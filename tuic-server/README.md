@@ -22,7 +22,7 @@ Minimalistic TUIC server implementation as a reference.
 
 `tuic-server` is a robust and actively developed implementation of the TUIC protocol server. It is a fork of the original TUIC project with significant enhancements and additional features. While it started as a reference implementation, it has evolved to include many production-ready capabilities.
 
-This fork includes advanced features such as Docker support, self-signed certificate capabilities, automatic certificate hot-reloading, updated dependencies, and improved performance through more relaxed locks. It is suitable for both learning and production environments.
+This fork includes advanced features such as self-signed certificate capabilities, automatic certificate hot-reloading, updated dependencies, and improved performance through more relaxed locks. It is suitable for both learning and production environments.
 
 ---
 
@@ -34,7 +34,6 @@ This fork includes advanced features such as Docker support, self-signed certifi
 - Multiple outbound proxy modes (direct, SOCKS5, etc.)
 - TLS support with auto-provisioning and self-signed certificates
 - RESTful API for monitoring and management
-- Docker and Docker Compose deployment options
 
 ---
 
@@ -67,41 +66,7 @@ tuic-server -d PATH/TO/CONFIG_DIR
 tuic-server --init
 ```
 
-The `-d/--dir` option searches for the first recognizable configuration file (`.toml`, `.json`, `.json5`, `.yaml`, `.yml`) in the specified directory, sorted alphabetically. This provides flexibility in Docker deployments and multi-environment setups.
-
-### Docker
-
-```bash
-docker run --name tuic-server \
-  --restart always \
-  --network host \
-  -v /PATH/TO/CONFIG_FILE:/etc/tuic/config.toml \
-  -v /PATH/TO/CERTIFICATE:/PATH/TO/CERTIFICATE \
-  -v /PATH/TO/PRIVATE_KEY:/PATH/TO/PRIVATE_KEY \
-  -dit ghcr.io/itsusinn/tuic-server:latest
-  ## or -dit docker.io/itsusinn/tuic-server:latest
-```
-
-**Note:** The Docker image now uses `-d /etc/tuic` by default, allowing you to mount your config directory.
-
-### Docker Compose
-
-```yaml
-services:
-  tuic:
-    image: ghcr.io/itsusinn/tuic-server:latest
-    ## or image: docker.io/itsusinn/tuic-server:latest
-    restart: always
-    container_name: tuic
-    network_mode: host
-    volumes:
-      - ./config.toml:/etc/tuic/config.toml:ro  # Mount config file
-      #- ./config:/etc/tuic:ro # Mount config directory
-      - ./cert.crt:/PATH/TO/CERT:ro
-      - ./key.crt:/PATH/TO/KEY:ro
-```
-
-The server will automatically detect and use the first config file found in `/etc/tuic`.
+The `-d/--dir` option searches for the first recognizable configuration file (`.toml`, `.json`, `.json5`, `.yaml`, `.yml`) in the specified directory, sorted alphabetically. This provides flexibility in multi-environment setups.
 
 ---
 

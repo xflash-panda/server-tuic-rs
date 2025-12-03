@@ -7,7 +7,6 @@ A fork of original TUIC repo https://github.com/tuic-protocol/tuic
 Compared to origin, this fork's new features:
 
 **Infrastructure & CI/CD:**
-- In-tree [Docker image builds](https://github.com/Itsusinn/tuic/pkgs/container/tuic-server) with multi-platform support (linux/amd64, linux/arm64)
 - Reusable CI/CD workflows with extensive cross-compilation support via [cross-rs](https://github.com/cross-rs/cross)
 - Support for multiple platforms: Linux (GNU/musl), Windows (MSVC), macOS, FreeBSD, and more
 

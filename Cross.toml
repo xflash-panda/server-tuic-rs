@@ -1,8 +1,7 @@
 [build]
 
 [build.env]
-volumes = ["/var/run/docker.sock=/var/run/docker.sock", "/tmp=/tmp"] # Docker in docker
-passthrough = ["RUSTFLAGS", "RUST_LOG", "CARGO_DOCKER_TEST"]
+passthrough = ["RUSTFLAGS", "RUST_LOG"]
 
 [target.mips-unknown-linux-musl]
 image = "ghcr.io/cross-rs/mips-unknown-linux-musl:edge"
