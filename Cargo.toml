@@ -1,5 +1,5 @@
 [workspace]
-members = ["tuic-core", "tuic-server", "tuic-client", "tuic-tests"]
+members = ["tuic-core", "tuic-server", "tuic-tests"]
 resolver = "2"
 
 [workspace.package]

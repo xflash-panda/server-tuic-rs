@@ -32,9 +32,6 @@ Compared to origin, this fork's new features:
 - Default localhost access protection
 - Private/LAN address filtering for enhanced security
 
-**Client Features:**
-- TCP/UDP port forwarding support
-- Local socket rebinding for better reliability
 
 ## Introduction
 
@@ -60,12 +57,11 @@ Fully-detailed TUIC protocol specification can be found in [SPEC.md](https://git
 
 ## Overview
 
-There are 4 crates provided in this repository:
+There are 3 crates provided in this repository:
 
 - **[tuic](https://github.com/Itsusinn/tuic/tree/dev/tuic)** - Library. The protocol itself, protocol & model abstraction, synchronous / asynchronous marshalling
 - **[tuic-quinn](https://github.com/Itsusinn/tuic/tree/dev/tuic-quinn)** - Library. A thin layer on top of [quinn](https://github.com/quinn-rs/quinn) to provide functions of TUIC
 - **[tuic-server](https://github.com/Itsusinn/tuic/tree/dev/tuic-server)** - Binary. Minimalistic TUIC server implementation as a reference
-- **[tuic-client](https://github.com/Itsusinn/tuic/tree/dev/tuic-client)** - Binary. Minimalistic TUIC client implementation as a reference
 
 
 

@@ -338,12 +338,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fbdf580320f38b612e485521afda1ee26d10cc9884efaaa750d383e13e3c5f4"
 
 [[package]]
-name = "byteorder"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
-
-[[package]]
 name = "bytes"
 version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1572,9 +1566,6 @@ name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
-dependencies = [
- "parking_lot_core",
-]
 
 [[package]]
 name = "once_cell_polyfill"
@@ -2387,29 +2378,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "socks5-proto"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8d1cbdbbffd5e2418d31ae833045a219062f1740f5f0f34baefa8e5bb2053ff"
-dependencies = [
- "byteorder",
- "bytes",
- "tokio",
-]
-
-[[package]]
-name = "socks5-server"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd7260a3af0411620eca9c63032069ec9f0d92ef4214e017672c864f573d6a21"
-dependencies = [
- "async-trait",
- "bytes",
- "socks5-proto",
- "tokio",
-]
-
-[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2674,7 +2642,6 @@ checksum = "2efa149fe76073d6e8fd97ef4f4eca7b67f599660115591483572e406e165594"
 dependencies = [
  "bytes",
  "futures-core",
- "futures-io",
  "futures-sink",
  "pin-project-lite",
  "tokio",
@@ -2897,47 +2864,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
-name = "tuic-client"
-version = "1.6.5"
-dependencies = [
- "anyhow",
- "aws-lc-rs",
- "bytes",
- "chrono",
- "clap",
- "crossbeam-utils",
- "educe",
- "eyre",
- "figment",
- "figment-json5",
- "humantime",
- "humantime-serde",
- "json5",
- "once_cell",
- "quinn",
- "register-count",
- "rustls",
- "rustls-native-certs",
- "rustls-pemfile",
- "serde",
- "serde_yaml",
- "socket2 0.6.1",
- "socks5-proto",
- "socks5-server",
- "tempfile",
- "thiserror 2.0.17",
- "tikv-jemallocator",
- "time",
- "tokio",
- "tokio-util",
- "toml 0.9.8",
- "tracing",
- "tracing-subscriber",
- "tuic-core",
- "uuid",
-]
-
-[[package]]
 name = "tuic-core"
 version = "1.6.5"
 dependencies = [
@@ -3023,7 +2949,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-test",
- "tuic-client",
  "tuic-core",
  "tuic-server",
  "uuid",

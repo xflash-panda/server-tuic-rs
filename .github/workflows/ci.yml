@@ -26,7 +26,7 @@ jobs:
     uses: ./.github/workflows/rust-build.yml
     with:
       rust-toolchain: "nightly-2025-10-05"
-      packages: "tuic-server,tuic-client"
+      packages: "tuic-server"
       target-config-file: ".github/target.toml"
       rustflags: "-Zthreads=8"
 
