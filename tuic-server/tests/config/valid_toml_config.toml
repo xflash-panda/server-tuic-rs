@@ -18,11 +18,6 @@ send_window = 10000000
 controller = "bbr"
 initial_window = 2000000
 
-[restful]
-addr = "192.168.1.100:8081"
-secret = "test_secret"
-maximum_clients_per_user = 5
-
 [users]
 "123e4567-e89b-12d3-a456-426614174000" = "password1"
 "123e4567-e89b-12d3-a456-426614174001" = "password2"

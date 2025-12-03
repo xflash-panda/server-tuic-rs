@@ -26,7 +26,6 @@ Compared to origin, this fork's new features:
 **Server Features:**
 - ACL (Access Control List) support with configurable outbound rules
 - SOCKS5 outbound proxy support
-- RESTful API with traffic statistics
 - Network interface binding support
 - Default localhost access protection
 - Private/LAN address filtering for enhanced security

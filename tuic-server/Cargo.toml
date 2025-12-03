@@ -71,9 +71,8 @@ tracing = "0.1"
 thiserror = { version = "2", default-features = false }
 eyre = { version = "0.6" }
 
-# Web
-axum = { version = "0.8", features = ["json", "tokio"] }
-axum-extra = { version = "0.12", features = ["typed-header"] }
+# Web (for ACME HTTP challenge server)
+axum = { version = "0.8", features = ["tokio"] }
 
 tikv-jemallocator = { version = "0.6", optional = true }
 

@@ -84,9 +84,6 @@ pub struct Config {
 	#[educe(Default = "")]
 	pub data_dir: PathBuf,
 
-	#[educe(Default = None)]
-	pub restful: Option<RestfulConfig>,
-
 	pub quic: QuicConfig,
 
 	#[educe(Default = true)]
@@ -176,10 +173,7 @@ pub struct Config {
 	pub __gso:                Option<bool>,
 	#[serde(default, rename = "pmtu")]
 	#[deprecated]
-	pub __pmtu:               Option<bool>,
-	#[serde(rename = "restful_server")]
-	#[deprecated]
-	pub __restful_server:     Option<SocketAddr>,
+	pub __pmtu: Option<bool>,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -304,18 +298,6 @@ pub struct CongestionControlConfig {
 
 #[derive(Deserialize, Serialize, Educe, Clone)]
 #[educe(Default)]
-#[serde(default, deny_unknown_fields)]
-pub struct RestfulConfig {
-	#[educe(Default(expression = "127.0.0.1:8443".parse().unwrap()))]
-	pub addr:                     SocketAddr,
-	#[educe(Default = "YOUR_SECRET_HERE")]
-	pub secret:                   String,
-	#[educe(Default = 0)]
-	pub maximum_clients_per_user: usize,
-}
-
-#[derive(Deserialize, Serialize, Educe, Clone)]
-#[educe(Default)]
 #[serde(default)]
 pub struct ExperimentalConfig {
 	#[educe(Default = true)]
@@ -381,18 +363,6 @@ impl Config {
 			}
 		}
 
-		// Migrate Restful-related fields
-		#[allow(deprecated)]
-		{
-			if let Some(restful_server) = self.__restful_server {
-				if self.restful.is_none() {
-					self.restful = Some(RestfulConfig::default());
-				}
-				if let Some(ref mut restful) = self.restful {
-					restful.addr = restful_server;
-				}
-			}
-		}
 	}
 
 	pub fn full_example() -> Self {
@@ -402,7 +372,6 @@ impl Config {
 				users.insert(Uuid::new_v4(), "YOUR_USER_PASSWD_HERE".into());
 				users
 			},
-			restful: Some(RestfulConfig::default()),
 			// Provide a minimal outbound example
 			outbound: OutboundConfig {
 				default: OutboundRule {
@@ -730,11 +699,6 @@ mod tests {
 		assert_eq!(result.quic.send_window, 10000000);
 		assert_eq!(result.quic.congestion_control.controller, CongestionController::Bbr);
 		assert_eq!(result.quic.congestion_control.initial_window, 2000000);
-
-		let restful = result.restful.unwrap();
-		assert_eq!(restful.addr, "192.168.1.100:8081".parse().unwrap());
-		assert_eq!(restful.secret, "test_secret");
-		assert_eq!(restful.maximum_clients_per_user, 5);
 
 		let uuid1 = Uuid::parse_str("123e4567-e89b-12d3-a456-426614174000").unwrap();
 		let uuid2 = Uuid::parse_str("123e4567-e89b-12d3-a456-426614174001").unwrap();
@@ -1091,8 +1055,6 @@ mod tests {
 		assert_eq!(result.quic.congestion_control.controller, CongestionController::Bbr);
 		assert_eq!(result.quic.max_idle_time, Duration::from_secs(60));
 		assert_eq!(result.quic.initial_mtu, 1500);
-		assert!(result.restful.is_some());
-		assert_eq!(result.restful.unwrap().addr, "0.0.0.0:8080".parse().unwrap());
 	}
 
 	#[tokio::test]
@@ -1187,11 +1149,6 @@ mod tests {
 		assert_eq!(result.quic.send_window, 8000000);
 		assert_eq!(result.quic.congestion_control.controller, CongestionController::Bbr);
 		assert_eq!(result.quic.congestion_control.initial_window, 1500000);
-
-		let restful = result.restful.unwrap();
-		assert_eq!(restful.addr, "127.0.0.1:8888".parse().unwrap());
-		assert_eq!(restful.secret, "json5_secret");
-		assert_eq!(restful.maximum_clients_per_user, 10);
 	}
 
 	#[tokio::test]

@@ -12,7 +12,7 @@ use tracing::{debug, info, warn};
 use tuic_core::quinn::{Authenticate, Connection as Model, side};
 
 use self::{authenticated::Authenticated, udp_session::UdpSession};
-use crate::{AppContext, error::Error, restful, utils::UdpRelayMode};
+use crate::{AppContext, error::Error, utils::UdpRelayMode};
 
 mod authenticated;
 mod handle_stream;
@@ -138,18 +138,13 @@ impl Connection {
 	async fn timeout_authenticate(self, timeout: Duration) {
 		time::sleep(timeout).await;
 
-		match self.auth.get() {
-			Some(uuid) => {
-				restful::client_connect(&self.ctx, &uuid, self.inner).await;
-			}
-			None => {
-				warn!(
-					"[{id:#010x}] [{addr}] [unauthenticated] [authenticate] timeout",
-					id = self.id(),
-					addr = self.inner.remote_address(),
-				);
-				self.close();
-			}
+		if self.auth.get().is_none() {
+			warn!(
+				"[{id:#010x}] [{addr}] [unauthenticated] [authenticate] timeout",
+				id = self.id(),
+				addr = self.inner.remote_address(),
+			);
+			self.close();
 		}
 	}
 
@@ -158,9 +153,6 @@ impl Connection {
 			time::sleep(self.ctx.cfg.gc_interval).await;
 
 			if self.is_closed() {
-				if let Some(uuid) = self.auth.get() {
-					restful::client_disconnect(&self.ctx, &uuid, self.inner).await;
-				}
 				break;
 			}
 

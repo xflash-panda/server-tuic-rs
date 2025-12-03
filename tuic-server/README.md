@@ -11,7 +11,6 @@ Minimalistic TUIC server implementation as a reference.
 - [Installation](#installation)
 - [Usage](#usage)
 - [Configuration](#configuration)
-- [RESTful API](#restful-api)
 - [TLS Certificates](#tls-certificates)
 - [Contributing](#contributing)
 - [License](#license)
@@ -33,7 +32,6 @@ This fork includes advanced features such as self-signed certificate capabilitie
 - Flexible ACL (Access Control List) system
 - Multiple outbound proxy modes (direct, SOCKS5, etc.)
 - TLS support with auto-provisioning and self-signed certificates
-- RESTful API for monitoring and management
 
 ---
 
@@ -161,14 +159,6 @@ hostname = "localhost"
 # Enable built-in ACME automatic SSL certificate provisioning
 auto_ssl = false
 
-[restful]
-# Address to bind RESTful API server
-addr = "127.0.0.1:8443"
-# Bearer token for API authentication
-secret = "YOUR_SECRET_HERE"
-# Limit for simultaneous clients per user UUID (0 = unlimited)
-maximum_clients_per_user = 0
-
 [quic]
 # Congestion control configuration
 [quic.congestion_control]
@@ -239,28 +229,6 @@ password = "optional"
 # Allow UDP when using SOCKS5 outbound (default: false)
 allow_udp = false
 ```
-
----
-
-## RESTful API
-
-The server exposes a RESTful API for monitoring and management. Authenticate using the `Authorization: Bearer` header.
-
-Example:
-
-```bash
-curl -H 'Authorization: Bearer YOUR_SECRET_HERE' http://ip:port/online
-```
-
-Endpoints:
-
-- `GET /online`: List online clients' count.
-- `GET /detailed_online`: List online clients' IP addresses and ports.
-- `POST /kick`: Kick specified users (clients can reconnect).
-- `GET /traffic`: Get current traffic stats.
-- `GET /reset_traffic`: Reset and return previous traffic stats.
-
-> Traffic data is lost when the server restarts.
 
 ---
 

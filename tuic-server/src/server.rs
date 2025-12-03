@@ -178,9 +178,6 @@ impl Server {
 
 	pub async fn start(&self) {
 		warn!("server started, listening on {}", self.ep.local_addr().unwrap());
-		if self.ctx.cfg.restful.is_some() {
-			tokio::spawn(crate::restful::start(self.ctx.clone()));
-		}
 
 		loop {
 			match self.ep.accept().await {

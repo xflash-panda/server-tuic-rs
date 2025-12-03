@@ -5,7 +5,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use eyre::{OptionExt, eyre};
+use eyre::eyre;
 use tokio::{
 	io::{AsyncReadExt, AsyncWriteExt},
 	net::{self, TcpSocket, TcpStream},
@@ -21,7 +21,7 @@ use crate::{
 	config::OutboundRule,
 	error::Error,
 	io::copy_io,
-	restful,
+	stats,
 	utils::{StackPrefer, UdpRelayMode},
 };
 
@@ -226,9 +226,12 @@ impl Connection {
 			}
 			_ = stream.shutdown().await;
 
-			let uuid = self.auth.get().ok_or_eyre("Unexpected autherization state")?;
-			restful::traffic_tx(&self.ctx, &uuid, tx);
-			restful::traffic_rx(&self.ctx, &uuid, rx);
+			// Record traffic stats
+			if let Some(uuid) = self.auth.get() {
+				stats::traffic_tx(&self.ctx, &uuid, tx);
+				stats::traffic_rx(&self.ctx, &uuid, rx);
+			}
+
 			if let Some(err) = err {
 				return Err(err.into());
 			}
@@ -427,8 +430,11 @@ impl Connection {
 				initial_addrs[0]
 			};
 
-			let uuid = self.auth.get().ok_or_eyre("Unexpected autherization state")?;
-			restful::traffic_tx(&self.ctx, &uuid, pkt.len());
+			// Record traffic stats for UDP outbound
+			if let Some(uuid) = self.auth.get() {
+				stats::traffic_tx(&self.ctx, &uuid, pkt.len());
+			}
+
 			if let Some(session) = session.upgrade() {
 				session.send(pkt, socket_addr).await
 			} else {
@@ -483,7 +489,10 @@ impl Connection {
 			src_addr = addr_display,
 		);
 
-		restful::traffic_rx(&self.ctx, &self.auth.get().ok_or_eyre("Unreachable")?, pkt.len());
+		// Record traffic stats for UDP inbound
+		if let Some(uuid) = self.auth.get() {
+			stats::traffic_rx(&self.ctx, &uuid, pkt.len());
+		}
 
 		let res = match self.udp_relay_mode.load().unwrap() {
 			UdpRelayMode::Native => self.model.packet_native(pkt, addr, assoc_id),

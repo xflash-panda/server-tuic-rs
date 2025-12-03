@@ -15,8 +15,8 @@ pub mod config;
 pub mod connection;
 pub mod error;
 pub mod io;
-pub mod restful;
 pub mod server;
+pub mod stats;
 pub mod tls;
 pub mod utils;
 
