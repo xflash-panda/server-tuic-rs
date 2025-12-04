@@ -28,7 +28,7 @@ This fork includes advanced features such as self-signed certificate capabilitie
 ## Features
 
 - Minimal TUIC protocol server implementation
-- TOML and legacy JSON configuration support
+- TOML configuration support
 - Flexible ACL (Access Control List) system
 - Multiple outbound proxy modes (direct, SOCKS5, etc.)
 - TLS support with auto-provisioning and self-signed certificates
@@ -64,17 +64,13 @@ tuic-server -d PATH/TO/CONFIG_DIR
 tuic-server --init
 ```
 
-The `-d/--dir` option searches for the first recognizable configuration file (`.toml`, `.json`, `.json5`, `.yaml`, `.yml`) in the specified directory, sorted alphabetically. This provides flexibility in multi-environment setups.
+The `-d/--dir` option searches for the first `.toml` configuration file in the specified directory, sorted alphabetically. This provides flexibility in multi-environment setups.
 
 ---
 
 ## Configuration
 
-- **TOML format**: Use `.toml` file extension (recommended for new configurations)
-- **JSON5 format**: Use `.json` or `.json5` file extension (legacy format, still supported)
-- **Yaml format**: Use `.yaml` or `.yml` file extension
-
-The format is automatically detected based on the file extension. You can also force TOML parsing by setting the `TUIC_FORCE_TOML` environment variable. Or use `TUIC_CONFIG_FORMAT` environment variable to explicitly specify the format (`toml` or `json5`).
+Configuration files use the TOML format with `.toml` file extension.
 
 ### Example configuration
 

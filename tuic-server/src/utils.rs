@@ -30,21 +30,25 @@ mod tests {
 
 	#[test]
 	fn test_stack_prefer_serde() {
-		// Test serialization
-		let v4_only = StackPrefer::V4only;
-		let json = serde_json::to_string(&v4_only).unwrap();
-		assert_eq!(json, "\"v4only\"");
+		use serde::Deserialize;
 
-		let v6_only = StackPrefer::V6only;
-		let json = serde_json::to_string(&v6_only).unwrap();
-		assert_eq!(json, "\"v6only\"");
+		#[derive(Deserialize)]
+		struct TestConfig {
+			mode: StackPrefer,
+		}
 
-		// Test deserialization
-		let v4_first: StackPrefer = serde_json::from_str("\"v4first\"").unwrap();
-		assert_eq!(v4_first, StackPrefer::V4first);
+		// Test deserialization from TOML
+		let config: TestConfig = toml::from_str(r#"mode = "v4first""#).unwrap();
+		assert_eq!(config.mode, StackPrefer::V4first);
 
-		let v6_first: StackPrefer = serde_json::from_str("\"v6first\"").unwrap();
-		assert_eq!(v6_first, StackPrefer::V6first);
+		let config: TestConfig = toml::from_str(r#"mode = "v6first""#).unwrap();
+		assert_eq!(config.mode, StackPrefer::V6first);
+
+		let config: TestConfig = toml::from_str(r#"mode = "v4only""#).unwrap();
+		assert_eq!(config.mode, StackPrefer::V4only);
+
+		let config: TestConfig = toml::from_str(r#"mode = "v6only""#).unwrap();
+		assert_eq!(config.mode, StackPrefer::V6only);
 	}
 
 	#[test]

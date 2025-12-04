@@ -9,9 +9,8 @@ use clap::Parser;
 use educe::Educe;
 use figment::{
 	Figment,
-	providers::{Format, Serialized, Toml, Yaml},
+	providers::{Format, Serialized, Toml},
 };
-use figment_json5::Json5;
 use serde::{Deserialize, Serialize};
 use tracing::{level_filters::LevelFilter, warn};
 use uuid::Uuid;
@@ -23,22 +22,6 @@ use crate::{
 	utils::{CongestionController, StackPrefer},
 };
 
-/// Environment state for configuration parsing
-#[derive(Debug, Clone, Default)]
-pub struct EnvState {
-	pub tuic_force_toml:    bool,
-	pub tuic_config_format: Option<String>,
-}
-
-impl EnvState {
-	/// Create EnvState from system environment variables
-	pub fn from_system() -> Self {
-		Self {
-			tuic_force_toml:    std::env::var("TUIC_FORCE_TOML").is_ok(),
-			tuic_config_format: std::env::var("TUIC_CONFIG_FORMAT").ok().map(|v| v.to_lowercase()),
-		}
-	}
-}
 
 /// Control flow results for CLI parsing
 #[derive(Debug)]
@@ -414,72 +397,8 @@ impl From<LogLevel> for LevelFilter {
 	}
 }
 
-/// Infer the config format from file content
-fn infer_config_format(content: &str) -> ConfigFormat {
-	let trimmed = content.trim_start();
 
-	// Check for JSON/JSON5 format
-	if trimmed.starts_with('{') || trimmed.starts_with('[') {
-		return ConfigFormat::Json;
-	}
-
-	// Check for YAML format (common indicators)
-	// YAML typically starts with --- or has key: value patterns
-	if trimmed.starts_with("---") || trimmed.starts_with("%YAML") {
-		return ConfigFormat::Yaml;
-	}
-
-	// Try to detect YAML-style indentation patterns
-	let lines: Vec<&str> = content
-		.lines()
-		.filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
-		.collect();
-	let has_yaml_patterns = lines.iter().any(|line| {
-		let trimmed_line = line.trim();
-		// YAML list items start with -
-		if trimmed_line.starts_with("- ") {
-			return true;
-		}
-		// YAML key-value with colon and typically followed by space or newline
-		if let Some(colon_pos) = trimmed_line.find(':') {
-			let after_colon = &trimmed_line[colon_pos + 1..];
-			// In YAML, after colon there's usually a space, newline, or it's at the end
-			// In TOML, = is used instead of :
-			return after_colon.is_empty() || after_colon.starts_with(' ') || after_colon.starts_with('\t');
-		}
-		false
-	});
-
-	// Check for TOML format (common indicators)
-	// TOML uses = for assignment and [section] for tables
-	let has_toml_patterns = lines.iter().any(|line| {
-		let trimmed_line = line.trim();
-		trimmed_line.starts_with('[') && trimmed_line.contains(']') && !trimmed_line.contains(':') || trimmed_line.contains('=')
-	});
-
-	// Decide based on patterns found
-	if has_toml_patterns && !has_yaml_patterns {
-		ConfigFormat::Toml
-	} else if has_yaml_patterns && !has_toml_patterns {
-		ConfigFormat::Yaml
-	} else if has_toml_patterns && has_yaml_patterns {
-		// If both patterns exist, prefer TOML as it's more distinctive
-		// (YAML could have = in values, but TOML [sections] are more specific)
-		ConfigFormat::Toml
-	} else {
-		// Default to Unknown if we can't determine
-		ConfigFormat::Unknown
-	}
-}
-
-enum ConfigFormat {
-	Json,
-	Toml,
-	Yaml,
-	Unknown,
-}
-
-/// Find the first recognizable config file in a directory
+/// Find the first TOML config file in a directory
 async fn find_config_in_dir(dir: &PathBuf) -> eyre::Result<PathBuf> {
 	if !dir.exists() {
 		return Err(eyre::eyre!("Directory not found: {}", dir.display()));
@@ -492,16 +411,13 @@ async fn find_config_in_dir(dir: &PathBuf) -> eyre::Result<PathBuf> {
 	let mut entries = tokio::fs::read_dir(dir).await?;
 	let mut config_files = Vec::new();
 
-	// Collect all files with recognizable config extensions
+	// Collect all TOML config files
 	while let Some(entry) = entries.next_entry().await? {
 		let path = entry.path();
 		if path.is_file() {
 			if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-				match ext.to_lowercase().as_str() {
-					"toml" | "json" | "json5" | "yaml" | "yml" => {
-						config_files.push(path);
-					}
-					_ => {}
+				if ext.to_lowercase() == "toml" {
+					config_files.push(path);
 				}
 			}
 		}
@@ -509,7 +425,7 @@ async fn find_config_in_dir(dir: &PathBuf) -> eyre::Result<PathBuf> {
 
 	if config_files.is_empty() {
 		return Err(eyre::eyre!(
-			"No recognizable config file found in directory: {}",
+			"No TOML config file found in directory: {}",
 			dir.display()
 		));
 	}
@@ -520,7 +436,7 @@ async fn find_config_in_dir(dir: &PathBuf) -> eyre::Result<PathBuf> {
 	Ok(config_files[0].clone())
 }
 
-pub async fn parse_config(cli: Cli, env_state: EnvState) -> eyre::Result<Config> {
+pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 	// Handle --init flag
 	if cli.init {
 		warn!("Generating an example configuration to config.toml......");
@@ -546,71 +462,10 @@ pub async fn parse_config(cli: Cli, env_state: EnvState) -> eyre::Result<Config>
 		return Err(eyre::eyre!("Config file not found: {}", cfg_path.display()));
 	}
 
-	let figmet = Figment::from(Serialized::defaults(Config::default()));
-	let format;
+	let figment = Figment::from(Serialized::defaults(Config::default()))
+		.merge(Toml::file(&cfg_path));
 
-	// Priority: TUIC_FORCE_TOML > TUIC_CONFIG_FORMAT > file extension > content inference
-	if env_state.tuic_force_toml {
-		format = ConfigFormat::Toml;
-	} else if let Some(ref env_format) = env_state.tuic_config_format {
-		// TUIC_CONFIG_FORMAT has higher priority than file extension
-		match env_format.to_lowercase().as_str() {
-			"json" | "json5" => {
-				format = ConfigFormat::Json;
-			}
-			"yaml" | "yml" => {
-				format = ConfigFormat::Yaml;
-			}
-			"toml" => {
-				format = ConfigFormat::Toml;
-			}
-			_ => format = ConfigFormat::Unknown,
-		}
-	} else {
-		// Fall back to file extension
-		match cfg_path
-			.extension()
-			.and_then(|v| v.to_str())
-			.unwrap_or_default()
-			.to_lowercase()
-			.as_str()
-		{
-			"json" | "json5" => {
-				format = ConfigFormat::Json;
-			}
-			"yaml" | "yml" => {
-				format = ConfigFormat::Yaml;
-			}
-			"toml" => {
-				format = ConfigFormat::Toml;
-			}
-			_ => format = ConfigFormat::Unknown,
-		}
-	}
-	let figmet = match format {
-		ConfigFormat::Json => figmet.merge(Json5::file(&cfg_path)),
-		ConfigFormat::Toml => figmet.merge(Toml::file(&cfg_path)),
-		ConfigFormat::Yaml => figmet.merge(Yaml::file(&cfg_path)),
-		ConfigFormat::Unknown => {
-			// Try to infer format from file content
-			let content = tokio::fs::read_to_string(&cfg_path).await?;
-			let inferred_format = infer_config_format(&content);
-
-			match inferred_format {
-				ConfigFormat::Json => figmet.merge(Json5::file(&cfg_path)),
-				ConfigFormat::Toml => figmet.merge(Toml::file(&cfg_path)),
-				ConfigFormat::Yaml => figmet.merge(Yaml::file(&cfg_path)),
-				ConfigFormat::Unknown => {
-					return Err(Control(
-						"Cannot infer config format from file extension or content, please set TUIC_CONFIG_FORMAT or \
-						 TUIC_FORCE_TOML",
-					))?;
-				}
-			}
-		}
-	};
-
-	let mut config: Config = figmet.extract()?;
+	let mut config: Config = figment.extract()?;
 
 	// Migrate legacy fields to new nested structure
 	config.migrate();
@@ -647,23 +502,16 @@ pub async fn parse_config(cli: Cli, env_state: EnvState) -> eyre::Result<Config>
 
 #[cfg(test)]
 mod tests {
-	use std::{
-		env, fs,
-		net::{Ipv6Addr, SocketAddr, SocketAddrV6},
-	};
+	use std::{env, fs};
 
 	use tempfile::tempdir;
 
 	use super::*;
 	use crate::acl::{AclPortSpec, AclProtocol};
 
-	async fn test_parse_config(config_content: &str, extension: &str) -> eyre::Result<Config> {
-		test_parse_config_with_env(config_content, extension, EnvState::default()).await
-	}
-
-	async fn test_parse_config_with_env(config_content: &str, extension: &str, env_state: EnvState) -> eyre::Result<Config> {
+	async fn test_parse_config(config_content: &str) -> eyre::Result<Config> {
 		let temp_dir = tempdir().unwrap();
-		let config_path = temp_dir.path().join(format!("config{}", extension));
+		let config_path = temp_dir.path().join("config.toml");
 
 		fs::write(&config_path, config_content).unwrap();
 
@@ -677,14 +525,14 @@ mod tests {
 		// Parse CLI with test arguments
 		let cli = Cli::try_parse_from(os_args)?;
 
-		// Call parse_config with the CLI and env_state
-		parse_config(cli, env_state).await
+		// Call parse_config with the CLI
+		parse_config(cli).await
 	}
 	#[tokio::test]
 	async fn test_valid_toml_config() -> eyre::Result<()> {
 		let config = include_str!("../tests/config/valid_toml_config.toml");
 
-		let result = test_parse_config(config, ".toml").await.unwrap();
+		let result = test_parse_config(config).await.unwrap();
 
 		assert_eq!(result.log_level, LogLevel::Warn);
 		assert_eq!(result.server, "127.0.0.1:8080".parse().unwrap());
@@ -711,31 +559,10 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_json_config() {
-		let config = include_str!("../tests/config/json_config.json");
-
-		let result = test_parse_config(config, ".json").await.unwrap();
-
-		assert_eq!(result.log_level, LogLevel::Error);
-		assert_eq!(
-			result.server,
-			SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8443, 0, 0))
-		);
-
-		let uuid = Uuid::parse_str("123e4567-e89b-12d3-a456-426614174002").unwrap();
-		assert_eq!(result.users.get(&uuid), Some(&"old_password".to_string()));
-
-
-		assert!(!result.tls.self_sign);
-		assert!(result.data_dir.ends_with("__test__legacy_data")); // Cleanup test directories
-		let _ = tokio::fs::remove_dir_all("__test__legacy_data").await;
-	}
-
-	#[tokio::test]
 	async fn test_path_handling() {
 		let config = include_str!("../tests/config/path_handling.toml");
 
-		let result = test_parse_config(config, ".toml").await.unwrap();
+		let result = test_parse_config(config).await.unwrap();
 
 		let current_dir = env::current_dir().unwrap();
 
@@ -758,7 +585,7 @@ mod tests {
 	async fn test_auto_ssl_path_generation() {
 		let config = include_str!("../tests/config/auto_ssl_path_generation.toml");
 
-		let result = test_parse_config(config, ".toml").await.unwrap();
+		let result = test_parse_config(config).await.unwrap();
 
 		let expected_cert = env::current_dir()
 			.unwrap()
@@ -781,12 +608,7 @@ mod tests {
 	async fn test_error_handling() {
 		// Test Invalid TOML
 		let config = "invalid toml content";
-		let result = test_parse_config(config, ".toml").await;
-		assert!(result.is_err());
-
-		// Test Invalid JSON
-		let config = "{ invalid json }";
-		let result = test_parse_config(config, ".json").await;
+		let result = test_parse_config(config).await;
 		assert!(result.is_err());
 
 		// Test non-existent configuration files - should fail when trying to parse
@@ -811,7 +633,7 @@ mod tests {
 		// Test that when no outbound configuration is provided, default is used
 		let config = include_str!("../tests/config/outbound_no_configuration.toml");
 
-		let result = test_parse_config(config, ".toml").await.unwrap();
+		let result = test_parse_config(config).await.unwrap();
 
 		// Should have default outbound configuration
 		assert_eq!(result.outbound.default.kind, "direct");
@@ -824,7 +646,7 @@ mod tests {
 		// passes
 		let config = include_str!("../tests/config/outbound_valid_with_default.toml");
 
-		let result = test_parse_config(config, ".toml").await.unwrap();
+		let result = test_parse_config(config).await.unwrap();
 
 		// Should have default and named outbound configurations
 		assert_eq!(result.outbound.default.kind, "direct");
@@ -849,7 +671,7 @@ mod tests {
 		// "only_v4" etc.
 		let config = include_str!("../tests/config/outbound_with_legacy_ip_mode_aliases.toml");
 
-		let result = test_parse_config(config, ".toml").await.unwrap();
+		let result = test_parse_config(config).await.unwrap();
 
 		// Verify default uses prefer_v4 (which maps to V4first)
 		assert_eq!(result.outbound.default.ip_mode, Some(StackPrefer::V4first));
@@ -869,7 +691,7 @@ mod tests {
 	async fn test_acl_parsing() {
 		let config = include_str!("../tests/config/acl_parsing.toml");
 
-		let result = test_parse_config(config, ".toml").await.unwrap();
+		let result = test_parse_config(config).await.unwrap();
 
 		assert_eq!(result.acl.len(), 10);
 
@@ -956,7 +778,7 @@ mod tests {
 		// Test minimal configuration with defaults
 		let config = include_str!("../tests/config/default_values.toml");
 
-		let result = test_parse_config(config, ".toml").await.unwrap();
+		let result = test_parse_config(config).await.unwrap();
 
 		// Check default values
 		assert_eq!(result.log_level, LogLevel::Info);
@@ -975,7 +797,7 @@ mod tests {
 	async fn test_invalid_uuid() {
 		let config = include_str!("../tests/config/invalid_uuid.toml");
 
-		let result = test_parse_config(config, ".toml").await;
+		let result = test_parse_config(config).await;
 		assert!(result.is_err());
 	}
 
@@ -983,7 +805,7 @@ mod tests {
 	async fn test_invalid_socket_addr() {
 		let config = include_str!("../tests/config/invalid_socket_addr.toml");
 
-		let result = test_parse_config(config, ".toml").await;
+		let result = test_parse_config(config).await;
 		assert!(result.is_err());
 	}
 
@@ -991,7 +813,7 @@ mod tests {
 	async fn test_duration_parsing() {
 		let config = include_str!("../tests/config/duration_parsing.toml");
 
-		let result = test_parse_config(config, ".toml").await.unwrap();
+		let result = test_parse_config(config).await.unwrap();
 
 		assert_eq!(result.auth_timeout, Duration::from_secs(5));
 		assert_eq!(result.task_negotiation_timeout, Duration::from_secs(10));
@@ -1004,7 +826,7 @@ mod tests {
 	async fn test_empty_acl() {
 		let config = include_str!("../tests/config/empty_acl.toml");
 
-		let result = test_parse_config(config, ".toml").await.unwrap();
+		let result = test_parse_config(config).await.unwrap();
 		assert_eq!(result.acl.len(), 0);
 	}
 
@@ -1012,7 +834,7 @@ mod tests {
 	async fn test_acl_comments_and_whitespace() {
 		let config = include_str!("../tests/config/acl_comments_and_whitespace.toml");
 
-		let result = test_parse_config(config, ".toml").await.unwrap();
+		let result = test_parse_config(config).await.unwrap();
 		// Should have 3 rules
 		assert_eq!(result.acl.len(), 3);
 	}
@@ -1022,174 +844,23 @@ mod tests {
 		// Test BBR
 		let config_bbr = include_str!("../tests/config/congestion_control_bbr.toml");
 
-		let result = test_parse_config(config_bbr, ".toml").await.unwrap();
+		let result = test_parse_config(config_bbr).await.unwrap();
 		assert_eq!(result.quic.congestion_control.controller, CongestionController::Bbr);
 
 		// Test NewReno (note: lowercase 'newreno' is the valid variant)
 		let config_new_reno = include_str!("../tests/config/congestion_control_newreno.toml");
 
-		let result = test_parse_config(config_new_reno, ".toml").await.unwrap();
+		let result = test_parse_config(config_new_reno).await.unwrap();
 		assert_eq!(result.quic.congestion_control.controller, CongestionController::NewReno);
 	}
 
-	#[tokio::test]
-	async fn test_backward_compatibility_standard_json() {
-		// Test backward compatibility with standard JSON format
-		let json_config = include_str!("../tests/config/backward_compatibility_standard_json.json");
-
-		let result = test_parse_config(json_config, ".json").await;
-		assert!(result.is_ok(), "Standard JSON should be parseable by JSON5");
-	}
-	#[tokio::test]
-	async fn test_legacy_field_migration_json() {
-		// Test legacy field migration with JSON format
-		let config = include_str!("../tests/config/legacy_field_migration_json.json");
-
-		let result = test_parse_config(config, ".json").await.unwrap();
-
-		// Verify migration worked
-		assert!(result.tls.self_sign);
-		assert!(result.tls.certificate.ends_with("cert.pem"));
-		assert!(result.tls.private_key.ends_with("key.pem"));
-		assert_eq!(result.tls.hostname, "example.com");
-		assert_eq!(result.quic.congestion_control.controller, CongestionController::Bbr);
-		assert_eq!(result.quic.max_idle_time, Duration::from_secs(60));
-		assert_eq!(result.quic.initial_mtu, 1500);
-	}
-
-	#[tokio::test]
-	async fn test_infer_format_toml_without_extension() {
-		// Test TOML config without file extension
-		let config = include_str!("../tests/config/infer_format_toml_without_extension");
-
-		let result = test_parse_config(config, "").await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Info);
-		assert_eq!(result.server, "127.0.0.1:8080".parse().unwrap());
-	}
-
-	#[tokio::test]
-	async fn test_infer_format_json_without_extension() {
-		// Test JSON config without file extension
-		let config = include_str!("../tests/config/infer_format_json_without_extension");
-
-		let result = test_parse_config(config, "").await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Debug);
-		assert_eq!(result.server, "0.0.0.0:8443".parse().unwrap());
-	}
-
-	#[tokio::test]
-	async fn test_yaml_config_format() {
-		// Test YAML config format with .yaml extension
-		// Note: test_parse_config helper trims whitespace which breaks YAML
-		// indentation, so we keep indentation minimal and avoid deeply nested
-		// structures
-		let config = include_str!("../tests/config/yaml_config_format.yaml");
-
-		let result = test_parse_config(config, ".yaml").await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Warn);
-		assert_eq!(result.server, "127.0.0.1:9000".parse().unwrap());
-		assert_eq!(result.tls.hostname, "yaml.test.com");
-	}
-
-	#[tokio::test]
-	async fn test_json5_with_comments() {
-		// Test JSON5 format with comments
-		let config = include_str!("../tests/config/json5_with_comments.json5");
-
-		let result = test_parse_config(config, ".json5").await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Info);
-		assert_eq!(result.server, "127.0.0.1:8080".parse().unwrap());
-		assert_eq!(result.tls.hostname, "test.json5.com");
-	}
-
-	#[tokio::test]
-	async fn test_json5_with_trailing_commas() {
-		// Test JSON5 format with trailing commas
-		let config = include_str!("../tests/config/json5_with_trailing_commas.json5");
-
-		let result = test_parse_config(config, ".json5").await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Debug);
-		assert_eq!(
-			result.server,
-			SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8443, 0, 0))
-		);
-		assert_eq!(result.users.len(), 2);
-	}
-
-	#[tokio::test]
-	async fn test_json5_with_unquoted_keys() {
-		// Test JSON5 format with unquoted keys
-		let config = include_str!("../tests/config/json5_with_unquoted_keys.json5");
-
-		let result = test_parse_config(config, ".json5").await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Warn);
-		assert_eq!(result.server, "0.0.0.0:8443".parse().unwrap());
-		assert_eq!(result.tls.hostname, "unquoted.test.com");
-	}
-
-	#[tokio::test]
-	async fn test_json5_comprehensive_features() {
-		// Test JSON5 with multiple features combined
-		let config = include_str!("../tests/config/json5_comprehensive_features.json5");
-
-		let result = test_parse_config(config, ".json5").await.unwrap();
-
-		assert_eq!(result.log_level, LogLevel::Info);
-		assert_eq!(result.server, "127.0.0.1:9443".parse().unwrap());
-		assert!(!result.udp_relay_ipv6);
-		assert!(result.zero_rtt_handshake);
-
-		assert_eq!(result.users.len(), 2);
-
-		assert!(result.tls.self_sign);
-		assert!(result.tls.auto_ssl);
-		assert_eq!(result.tls.hostname, "json5.example.com");
-		assert_eq!(result.quic.initial_mtu, 1400);
-		assert_eq!(result.quic.min_mtu, 1300);
-		assert_eq!(result.quic.send_window, 8000000);
-		assert_eq!(result.quic.congestion_control.controller, CongestionController::Bbr);
-		assert_eq!(result.quic.congestion_control.initial_window, 1500000);
-	}
-
-	#[tokio::test]
-	async fn test_json5_with_acl_rules() {
-		// Test JSON5 format with ACL rules using multiline string
-		let config = include_str!("../tests/config/json5_with_acl_rules.json5");
-
-		let result = test_parse_config(config, ".json5").await.unwrap();
-
-		assert_eq!(result.acl.len(), 4);
-
-		// Verify first ACL rule
-		assert_eq!(result.acl[0].outbound, "allow");
-		assert_eq!(result.acl[0].addr, AclAddress::Localhost);
-
-		// Verify CIDR rule
-		assert_eq!(result.acl[2].outbound, "reject");
-		assert_eq!(result.acl[2].addr, AclAddress::Cidr("10.0.0.0/8".to_string()));
-
-		// Verify wildcard domain
-		assert_eq!(result.acl[3].outbound, "allow");
-		assert_eq!(result.acl[3].addr, AclAddress::WildcardDomain("*.example.com".to_string()));
-	}
-
-	#[tokio::test]
-	async fn test_json5_backward_compatibility() {
-		// Test that JSON5 parser can handle standard JSON
-		let config = include_str!("../tests/config/json5_backward_compatibility.json5");
-
-		let result = test_parse_config(config, ".json5").await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Error);
-		assert_eq!(result.server, "192.168.1.1:8443".parse().unwrap());
-		assert!(!result.tls.self_sign);
-	}
 	#[tokio::test]
 	async fn test_dir_parameter_finds_config() {
 		// Test that --dir finds the first config file in a directory
 		let temp_dir = tempdir().unwrap();
 		let dir_path = temp_dir.path();
 
-		// Create multiple config files
+		// Create config file
 		let config_content = r#"
 			log_level = "info"
 			server = "127.0.0.1:8080"
@@ -1197,7 +868,6 @@ mod tests {
 		"#;
 
 		fs::write(dir_path.join("config.toml"), config_content).unwrap();
-		fs::write(dir_path.join("other.json"), "{}").unwrap();
 
 		let os_args = vec![
 			"test_binary".to_owned(),
@@ -1206,7 +876,7 @@ mod tests {
 		];
 
 		let cli = Cli::try_parse_from(os_args).unwrap();
-		let result = parse_config(cli, EnvState::default()).await;
+		let result = parse_config(cli).await;
 
 		assert!(result.is_ok());
 		let config = result.unwrap();
@@ -1234,7 +904,7 @@ mod tests {
 		];
 
 		let cli = Cli::try_parse_from(os_args).unwrap();
-		let result = parse_config(cli, EnvState::default()).await.unwrap();
+		let result = parse_config(cli).await.unwrap();
 
 		// Should pick a_config.toml which has debug level
 		assert_eq!(result.log_level, LogLevel::Debug);
@@ -1256,11 +926,11 @@ mod tests {
 		];
 
 		let cli = Cli::try_parse_from(os_args).unwrap();
-		let result = parse_config(cli, EnvState::default()).await;
+		let result = parse_config(cli).await;
 
 		assert!(result.is_err());
 		if let Err(err) = result {
-			assert!(err.to_string().contains("No recognizable config file found"));
+			assert!(err.to_string().contains("No TOML config file found"));
 		}
 	}
 
@@ -1274,7 +944,7 @@ mod tests {
 		];
 
 		let cli = Cli::try_parse_from(os_args).unwrap();
-		let result = parse_config(cli, EnvState::default()).await;
+		let result = parse_config(cli).await;
 
 		assert!(result.is_err());
 		if let Err(err) = result {
@@ -1304,165 +974,10 @@ mod tests {
 		];
 
 		let cli = Cli::try_parse_from(os_args).unwrap();
-		let result = parse_config(cli, EnvState::default()).await.unwrap();
+		let result = parse_config(cli).await.unwrap();
 
 		// Should use explicit config, not dir
 		assert_eq!(result.log_level, LogLevel::Warn);
 	}
 
-	#[tokio::test]
-	async fn test_dir_parameter_supports_all_formats() {
-		// Test that --dir recognizes all supported config formats
-		let temp_dir = tempdir().unwrap();
-		let dir_path = temp_dir.path();
-
-		// Test with JSON
-		let json_dir = dir_path.join("json_test");
-		fs::create_dir(&json_dir).unwrap();
-		fs::write(json_dir.join("config.json"), r#"{"log_level": "debug"}"#).unwrap();
-
-		let os_args = vec![
-			"test_binary".to_owned(),
-			"--dir".to_owned(),
-			json_dir.to_string_lossy().into_owned(),
-		];
-		let cli = Cli::try_parse_from(os_args).unwrap();
-		let result = parse_config(cli, EnvState::default()).await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Debug);
-
-		// Test with YAML
-		let yaml_dir = dir_path.join("yaml_test");
-		fs::create_dir(&yaml_dir).unwrap();
-		fs::write(yaml_dir.join("config.yaml"), "log_level: warn").unwrap();
-
-		let os_args = vec![
-			"test_binary".to_owned(),
-			"--dir".to_owned(),
-			yaml_dir.to_string_lossy().into_owned(),
-		];
-		let cli = Cli::try_parse_from(os_args).unwrap();
-		let result = parse_config(cli, EnvState::default()).await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Warn);
-	}
-
-	#[tokio::test]
-	async fn test_env_state_force_toml() {
-		// Test TUIC_FORCE_TOML forces TOML parsing even with .json extension
-		let config_content = include_str!("../tests/config/env_force_toml.toml");
-
-		let env_state = EnvState {
-			tuic_force_toml:    true,
-			tuic_config_format: None,
-		};
-
-		// Use .json extension but content is TOML
-		let result = test_parse_config_with_env(config_content, ".json", env_state).await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Info);
-		assert_eq!(result.server, "127.0.0.1:8443".parse().unwrap());
-	}
-
-	#[tokio::test]
-	async fn test_env_state_config_format_yaml() {
-		// Test TUIC_CONFIG_FORMAT=yaml forces YAML parsing
-		let config_content = include_str!("../tests/config/env_format_yaml.yaml");
-
-		let env_state = EnvState {
-			tuic_force_toml:    false,
-			tuic_config_format: Some("yaml".to_string()),
-		};
-
-		// Use .toml extension but content is YAML
-		let result = test_parse_config_with_env(config_content, ".toml", env_state).await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Debug);
-		assert_eq!(
-			result.server,
-			SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8443, 0, 0))
-		);
-	}
-
-	#[tokio::test]
-	async fn test_env_state_config_format_json() {
-		// Test TUIC_CONFIG_FORMAT=json forces JSON parsing
-		let config_content = include_str!("../tests/config/env_format_json.json");
-
-		let env_state = EnvState {
-			tuic_force_toml:    false,
-			tuic_config_format: Some("json".to_string()),
-		};
-
-		// Use .toml extension but content is JSON
-		let result = test_parse_config_with_env(config_content, ".toml", env_state).await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Warn);
-		assert_eq!(result.server, "127.0.0.1:9999".parse().unwrap());
-	}
-
-	#[tokio::test]
-	async fn test_env_state_priority_force_toml_over_config_format() {
-		// Test that TUIC_FORCE_TOML has higher priority than TUIC_CONFIG_FORMAT
-		let config_content = include_str!("../tests/config/env_force_toml.toml");
-
-		let env_state = EnvState {
-			tuic_force_toml:    true,
-			tuic_config_format: Some("json".to_string()), // This should be ignored
-		};
-
-		let result = test_parse_config_with_env(config_content, ".yaml", env_state).await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Info);
-	}
-
-	#[tokio::test]
-	async fn test_env_state_priority_config_format_over_extension() {
-		// Test that TUIC_CONFIG_FORMAT has higher priority than file extension
-		let config_content = include_str!("../tests/config/env_format_yaml.yaml");
-
-		let env_state = EnvState {
-			tuic_force_toml:    false,
-			tuic_config_format: Some("yaml".to_string()),
-		};
-
-		// File extension says .json but env says yaml
-		let result = test_parse_config_with_env(config_content, ".json", env_state).await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Debug);
-	}
-
-	#[tokio::test]
-	async fn test_env_state_from_system() {
-		// Test EnvState::from_system() reads environment variables correctly
-		// Note: This test doesn't actually set env vars, just tests the structure
-		let env_state = EnvState::from_system();
-
-		// Should not panic and return a valid EnvState
-		assert!(env_state.tuic_config_format.is_none() || env_state.tuic_config_format.is_some());
-	}
-
-	#[tokio::test]
-	async fn test_env_state_case_insensitive_format() {
-		// Test that format names are case-insensitive
-		let config_content = include_str!("../tests/config/env_format_yaml.yaml");
-
-		let env_state = EnvState {
-			tuic_force_toml:    false,
-			tuic_config_format: Some("YAML".to_string()), // Uppercase
-		};
-
-		let result = test_parse_config_with_env(config_content, ".toml", env_state).await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Debug);
-	}
-
-	#[tokio::test]
-	async fn test_env_state_invalid_format() {
-		// Test that invalid format in TUIC_CONFIG_FORMAT falls back to Unknown
-		let config_content = include_str!("../tests/config/env_force_toml.toml");
-
-		let env_state = EnvState {
-			tuic_force_toml:    false,
-			tuic_config_format: Some("invalid_format".to_string()),
-		};
-
-		// Should try to infer from content
-		let result = test_parse_config_with_env(config_content, ".txt", env_state).await;
-
-		// Should succeed because inference will detect TOML
-		assert!(result.is_ok());
-	}
 }
