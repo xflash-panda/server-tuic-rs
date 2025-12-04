@@ -138,8 +138,9 @@ default 8.8.4.4 udp/53 1.1.1.1
 '''
 
 [users]
-# User list: UUID = password
-f0e12827-fe60-458c-8269-a05ccb0ff8da = "password"
+# User list: UUID = UID
+# UUID acts as the authentication token (password), UID is used for statistics tracking
+f0e12827-fe60-458c-8269-a05ccb0ff8da = 1
 
 [tls]
 # Use auto-generated self-signed certificate and key

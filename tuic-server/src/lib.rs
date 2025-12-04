@@ -24,21 +24,21 @@ pub use config::{Cli, Config, Control};
 
 pub struct AppContext {
 	pub cfg:            Config,
-	pub online_counter: HashMap<Uuid, AtomicUsize>,
+	pub online_counter: HashMap<u64, AtomicUsize>,
 	pub online_clients: Cache<Uuid, Arc<Cache<usize, compat::QuicClient>>>,
-	pub traffic_stats:  HashMap<Uuid, (AtomicUsize, AtomicUsize)>,
+	pub traffic_stats:  HashMap<u64, (AtomicUsize, AtomicUsize)>,
 }
 
 /// Run the TUIC server with the given configuration
 pub async fn run(cfg: Config) -> eyre::Result<()> {
 	let mut online_counter = HashMap::new();
-	for (user, _) in cfg.users.iter() {
-		online_counter.insert(user.to_owned(), AtomicUsize::new(0));
+	for (_, uid) in cfg.users.iter() {
+		online_counter.insert(*uid, AtomicUsize::new(0));
 	}
 
 	let mut traffic_stats = HashMap::new();
-	for (user, _) in cfg.users.iter() {
-		traffic_stats.insert(user.to_owned(), (AtomicUsize::new(0), AtomicUsize::new(0)));
+	for (_, uid) in cfg.users.iter() {
+		traffic_stats.insert(*uid, (AtomicUsize::new(0), AtomicUsize::new(0)));
 	}
 
 	let ctx = Arc::new(AppContext {

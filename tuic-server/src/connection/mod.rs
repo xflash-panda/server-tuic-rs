@@ -121,14 +121,9 @@ impl Connection {
 	async fn authenticate(&self, auth: &Authenticate) -> Result<(), Error> {
 		if self.auth.get().is_some() {
 			Err(Error::DuplicatedAuth)
-		} else if self
-			.ctx
-			.cfg
-			.users
-			.get(&auth.uuid())
-			.is_some_and(|password| auth.validate(password))
-		{
-			self.auth.set(auth.uuid()).await;
+		} else if let Some(&uid) = self.ctx.cfg.users.get(&auth.uuid()) {
+			// UUID exists - authentication successful (UUID acts as password)
+			self.auth.set(auth.uuid(), uid).await;
 			Ok(())
 		} else {
 			Err(Error::AuthFailed(auth.uuid()))

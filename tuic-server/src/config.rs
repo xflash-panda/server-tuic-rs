@@ -61,7 +61,7 @@ pub struct Config {
 	pub log_level: LogLevel,
 	#[educe(Default(expression = "[::]:8443".parse().unwrap()))]
 	pub server:    SocketAddr,
-	pub users:     HashMap<Uuid, String>,
+	pub users:     HashMap<Uuid, u64>,
 	pub tls:       TlsConfig,
 
 	#[educe(Default = "")]
@@ -352,7 +352,7 @@ impl Config {
 		Self {
 			users: {
 				let mut users = HashMap::new();
-				users.insert(Uuid::new_v4(), "YOUR_USER_PASSWD_HERE".into());
+				users.insert(Uuid::new_v4(), 1);
 				users
 			},
 			// Provide a minimal outbound example
@@ -550,8 +550,8 @@ mod tests {
 
 		let uuid1 = Uuid::parse_str("123e4567-e89b-12d3-a456-426614174000").unwrap();
 		let uuid2 = Uuid::parse_str("123e4567-e89b-12d3-a456-426614174001").unwrap();
-		assert_eq!(result.users.get(&uuid1), Some(&"password1".to_string()));
-		assert_eq!(result.users.get(&uuid2), Some(&"password2".to_string()));
+		assert_eq!(result.users.get(&uuid1), Some(&1));
+		assert_eq!(result.users.get(&uuid2), Some(&2));
 
 		// Cleanup test directories
 		let _ = tokio::fs::remove_dir_all("__test__custom_data").await;

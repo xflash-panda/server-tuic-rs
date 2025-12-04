@@ -2,7 +2,7 @@ use std::{
 	fmt::{Display, Formatter, Result as FmtResult},
 	sync::{
 		Arc,
-		atomic::{AtomicBool, Ordering},
+		atomic::{AtomicBool, AtomicU64, Ordering},
 	},
 };
 
@@ -16,6 +16,8 @@ pub struct Authenticated(Arc<AuthenticatedInner>);
 struct AuthenticatedInner {
 	/// uuid that waiting for auth
 	uuid:             ArcSwapOption<Uuid>,
+	/// uid for statistics (set after successful auth)
+	uid:              AtomicU64,
 	notify:           Notify,
 	is_authenticated: AtomicBool,
 }
@@ -25,14 +27,16 @@ impl Authenticated {
 	pub fn new() -> Self {
 		Self(Arc::new(AuthenticatedInner {
 			uuid:             ArcSwapOption::new(None),
+			uid:              AtomicU64::new(0),
 			notify:           Notify::new(),
 			is_authenticated: AtomicBool::new(false),
 		}))
 	}
 
 	/// invoking 'set' means auth success
-	pub async fn set(&self, uuid: Uuid) {
+	pub async fn set(&self, uuid: Uuid, uid: u64) {
 		self.0.uuid.store(Some(Arc::new(uuid)));
+		self.0.uid.store(uid, Ordering::SeqCst);
 
 		// Mark as authenticated and notify all waiters
 		self.0.is_authenticated.store(true, Ordering::SeqCst);
@@ -41,6 +45,11 @@ impl Authenticated {
 
 	pub fn get(&self) -> Option<Uuid> {
 		self.0.uuid.load().as_deref().cloned()
+	}
+
+	/// Get the UID (only valid after successful authentication)
+	pub fn get_uid(&self) -> u64 {
+		self.0.uid.load(Ordering::SeqCst)
 	}
 
 	/// Check if already authenticated (non-blocking)
@@ -88,9 +97,11 @@ mod tests {
 	async fn test_authenticated_get_set() {
 		let auth = Authenticated::new();
 		assert!(auth.get().is_none());
+		assert_eq!(auth.get_uid(), 0);
 		let uuid = Uuid::new_v4();
-		auth.set(uuid).await;
+		auth.set(uuid, 42).await;
 		assert_eq!(auth.get(), Some(uuid));
+		assert_eq!(auth.get_uid(), 42);
 	}
 
 	#[tokio::test]
@@ -101,8 +112,9 @@ mod tests {
 		let wait_fut = tokio::spawn(async move {
 			auth_clone.wait().await;
 			assert_eq!(auth_clone.get(), Some(uuid));
+			assert_eq!(auth_clone.get_uid(), 123);
 		});
-		auth.set(uuid).await;
+		auth.set(uuid, 123).await;
 		wait_fut.await.unwrap();
 	}
 }
