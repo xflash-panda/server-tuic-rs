@@ -1342,13 +1342,12 @@ dependencies = [
 
 [[package]]
 name = "json5"
-version = "0.4.1"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96b0db21af676c1ce64250b5f40f3ce2cf27e4e47cb91ed91eb6fe9350b430c1"
+checksum = "1bfcd7c9a7e6d6270614c3c7ccec2ec6fb0bf7f6da3384042e80e737cde1f941"
 dependencies = [
- "pest",
- "pest_derive",
  "serde",
+ "ucd-trie",
 ]
 
 [[package]]
