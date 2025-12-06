@@ -1,5 +1,2 @@
 [users]
 "not-a-valid-uuid" = 1
-
-[tls]
-self_sign = true

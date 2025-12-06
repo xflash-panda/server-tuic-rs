@@ -1,9 +1,6 @@
 [users]
 "123e4567-e89b-12d3-a456-426614174000" = 1
 
-[tls]
-self_sign = true
-
 [outbound.default]
 type = "direct"
 ip_mode = "v4first"

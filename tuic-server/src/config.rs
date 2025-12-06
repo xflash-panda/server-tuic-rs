@@ -47,6 +47,14 @@ pub struct Cli {
 	/// Generate an example configuration file (config.toml)
 	#[arg(short, long)]
 	pub init: bool,
+
+	/// Path to the certificate file
+	#[arg(long, value_name = "PATH", default_value = "/root/.cert/server.crt")]
+	pub cert_file: PathBuf,
+
+	/// Path to the private key file
+	#[arg(long, value_name = "PATH", default_value = "/root/.cert/server.key")]
+	pub key_file: PathBuf,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -57,7 +65,13 @@ pub struct Config {
 	#[educe(Default(expression = "[::]:8443".parse().unwrap()))]
 	pub server:    SocketAddr,
 	pub users:     HashMap<Uuid, u64>,
-	pub tls:       TlsConfig,
+
+	/// Certificate file path (set from CLI, not config file)
+	#[serde(skip)]
+	pub cert_file: PathBuf,
+	/// Private key file path (set from CLI, not config file)
+	#[serde(skip)]
+	pub key_file: PathBuf,
 
 	#[educe(Default = "")]
 	pub data_dir: PathBuf,
@@ -106,13 +120,16 @@ pub struct Config {
 
 	pub experimental: ExperimentalConfig,
 
-	/// Old configuration fields
-	#[serde(default, rename = "certificate")]
+	/// Old configuration fields (deprecated, kept for migration)
+	#[serde(default, skip_serializing, rename = "tls")]
 	#[deprecated]
-	pub __certificate:        Option<PathBuf>,
-	#[serde(default, rename = "private_key")]
+	pub __tls:                Option<serde::de::IgnoredAny>,
+	#[serde(default, skip_serializing, rename = "certificate")]
 	#[deprecated]
-	pub __private_key:        Option<PathBuf>,
+	pub __certificate:        Option<serde::de::IgnoredAny>,
+	#[serde(default, skip_serializing, rename = "private_key")]
+	#[deprecated]
+	pub __private_key:        Option<serde::de::IgnoredAny>,
 	#[serde(default, rename = "congestion_control")]
 	#[deprecated]
 	pub __congestion_control: Option<CongestionController>,
@@ -145,15 +162,6 @@ pub struct Config {
 	pub __pmtu: Option<bool>,
 }
 
-#[derive(Deserialize, Serialize, Educe)]
-#[educe(Default)]
-#[serde(default, deny_unknown_fields)]
-pub struct TlsConfig {
-	#[educe(Default(expression = ""))]
-	pub certificate: PathBuf,
-	#[educe(Default(expression = ""))]
-	pub private_key: PathBuf,
-}
 
 #[derive(Deserialize, Serialize, Educe)]
 #[educe(Default)]
@@ -270,17 +278,6 @@ pub struct ExperimentalConfig {
 
 impl Config {
 	pub fn migrate(&mut self) {
-		// Migrate TLS-related fields
-		#[allow(deprecated)]
-		{
-			if let Some(certificate) = self.__certificate.take() {
-				self.tls.certificate = certificate;
-			}
-			if let Some(private_key) = self.__private_key.take() {
-				self.tls.private_key = private_key;
-			}
-		}
-
 		// Migrate QUIC-related fields
 		#[allow(deprecated)]
 		{
@@ -402,15 +399,9 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 		tokio::fs::create_dir_all(&config.data_dir).await?;
 	};
 
-	// Determine certificate and key paths
-	let base_dir = config.data_dir.clone();
-	if config.tls.certificate.is_relative() && config.tls.certificate.to_str() != Some("") {
-		config.tls.certificate = config.data_dir.join(&config.tls.certificate);
-	}
-
-	if config.tls.private_key.is_relative() && config.tls.private_key.to_str() != Some("") {
-		config.tls.private_key = base_dir.join(&config.tls.private_key);
-	}
+	// Set certificate and key paths from CLI arguments
+	config.cert_file = cli.cert_file;
+	config.key_file = cli.key_file;
 
 	Ok(config)
 }
@@ -480,14 +471,9 @@ mod tests {
 
 		assert_eq!(result.data_dir, current_dir.join("__test__relative_path"));
 
-		assert_eq!(
-			result.tls.certificate,
-			current_dir.join("__test__relative_path").join("certs/server.crt")
-		);
-		assert_eq!(
-			result.tls.private_key,
-			current_dir.join("__test__relative_path").join("certs/server.key")
-		);
+		// Certificate paths are now provided via CLI arguments with defaults
+		assert_eq!(result.cert_file, PathBuf::from("/root/.cert/server.crt"));
+		assert_eq!(result.key_file, PathBuf::from("/root/.cert/server.key"));
 
 		// Cleanup test directories
 		let _ = tokio::fs::remove_dir_all("__test__relative_path").await;

@@ -28,7 +28,7 @@ pub struct Server {
 
 impl Server {
 	pub async fn init(ctx: Arc<AppContext>) -> Result<Self, Error> {
-		let cert_resolver = CertResolver::new(&ctx.cfg.tls.certificate, &ctx.cfg.tls.private_key).await?;
+		let cert_resolver = CertResolver::new(&ctx.cfg.cert_file, &ctx.cfg.key_file).await?;
 
 		let mut crypto = RustlsServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
 			.with_no_client_auth()

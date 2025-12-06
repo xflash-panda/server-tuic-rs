@@ -57,14 +57,21 @@ Run the TUIC server with a configuration file:
 # Specify config file directly
 tuic-server -c PATH/TO/CONFIG
 
-# Specify config directory (automatically finds first config file)
-tuic-server -d PATH/TO/CONFIG_DIR
+# Specify config file with custom certificate paths
+tuic-server -c PATH/TO/CONFIG --cert-file /path/to/cert.pem --key-file /path/to/key.pem
 
 # Generate example configuration file
 tuic-server --init
 ```
 
-The `-d/--dir` option searches for the first `.toml` configuration file in the specified directory, sorted alphabetically. This provides flexibility in multi-environment setups.
+### Command Line Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-c, --config <PATH>` | Path to the config file | Required |
+| `--cert-file <PATH>` | Path to the certificate file | `/root/.cert/server.crt` |
+| `--key-file <PATH>` | Path to the private key file | `/root/.cert/server.key` |
+| `-i, --init` | Generate example configuration file | - |
 
 ---
 
@@ -141,12 +148,6 @@ default 8.8.4.4 udp/53 1.1.1.1
 # User list: UUID = UID
 # UUID acts as the authentication token (password), UID is used for statistics tracking
 f0e12827-fe60-458c-8269-a05ccb0ff8da = 1
-
-[tls]
-# Path to certificate file (relative to data_dir if not absolute)
-certificate = "/path/to/cert.pem"
-# Path to private key file (relative to data_dir if not absolute)
-private_key = "/path/to/key.pem"
 
 [quic]
 # Congestion control configuration
