@@ -31,3 +31,4 @@ tracing-test = { version = "0.2" }
 tracing = "0.1"
 serial_test = "3"
 aws-lc-rs = { version = "1", default-features = false, optional = true, features = ["prebuilt-nasm"] }
+server-r-client = { git = "https://github.com/xflash-panda/server-r-client", branch = "dev" }
