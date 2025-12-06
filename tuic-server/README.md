@@ -88,9 +88,6 @@ log_level = "info"
 # Socket address to listen on
 server = "[::]:443"
 
-# Working directory for tuic-server (used for relative certificate/key paths)
-data_dir = ""
-
 # Create separate UDP sockets for relaying IPv6 UDP packets
 udp_relay_ipv6 = true
 # Enable 0-RTT QUIC handshake (recommended: false for security)

@@ -73,9 +73,6 @@ pub struct Config {
 	#[serde(skip)]
 	pub key_file: PathBuf,
 
-	#[educe(Default = "")]
-	pub data_dir: PathBuf,
-
 	pub quic: QuicConfig,
 
 	#[educe(Default = true)]
@@ -390,15 +387,6 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 	// Migrate legacy fields to new nested structure
 	config.migrate();
 
-	if config.data_dir.to_str() == Some("") {
-		config.data_dir = std::env::current_dir()?
-	} else if config.data_dir.is_relative() {
-		config.data_dir = std::env::current_dir()?.join(config.data_dir);
-		tokio::fs::create_dir_all(&config.data_dir).await?;
-	} else {
-		tokio::fs::create_dir_all(&config.data_dir).await?;
-	};
-
 	// Set certificate and key paths from CLI arguments
 	config.cert_file = cli.cert_file;
 	config.key_file = cli.key_file;
@@ -408,7 +396,7 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 
 #[cfg(test)]
 mod tests {
-	use std::{env, fs};
+	use std::fs;
 
 	use tempfile::tempdir;
 
@@ -456,27 +444,7 @@ mod tests {
 		assert_eq!(result.users.get(&uuid1), Some(&1));
 		assert_eq!(result.users.get(&uuid2), Some(&2));
 
-		// Cleanup test directories
-		let _ = tokio::fs::remove_dir_all("__test__custom_data").await;
 		Ok(())
-	}
-
-	#[tokio::test]
-	async fn test_path_handling() {
-		let config = include_str!("../tests/config/path_handling.toml");
-
-		let result = test_parse_config(config).await.unwrap();
-
-		let current_dir = env::current_dir().unwrap();
-
-		assert_eq!(result.data_dir, current_dir.join("__test__relative_path"));
-
-		// Certificate paths are now provided via CLI arguments with defaults
-		assert_eq!(result.cert_file, PathBuf::from("/root/.cert/server.crt"));
-		assert_eq!(result.key_file, PathBuf::from("/root/.cert/server.key"));
-
-		// Cleanup test directories
-		let _ = tokio::fs::remove_dir_all("__test__relative_path").await;
 	}
 
 	#[tokio::test]
