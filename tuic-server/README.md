@@ -21,7 +21,7 @@ Minimalistic TUIC server implementation as a reference.
 
 `tuic-server` is a robust and actively developed implementation of the TUIC protocol server. It is a fork of the original TUIC project with significant enhancements and additional features. While it started as a reference implementation, it has evolved to include many production-ready capabilities.
 
-This fork includes advanced features such as self-signed certificate capabilities, automatic certificate hot-reloading, updated dependencies, and improved performance through more relaxed locks. It is suitable for both learning and production environments.
+This fork includes updated dependencies and improved performance through more relaxed locks. It is suitable for both learning and production environments.
 
 ---
 
@@ -31,7 +31,7 @@ This fork includes advanced features such as self-signed certificate capabilitie
 - TOML configuration support
 - Flexible ACL (Access Control List) system
 - Multiple outbound proxy modes (direct, SOCKS5, etc.)
-- TLS support with auto-provisioning and self-signed certificates
+- TLS support
 
 ---
 
@@ -143,18 +143,12 @@ default 8.8.4.4 udp/53 1.1.1.1
 f0e12827-fe60-458c-8269-a05ccb0ff8da = 1
 
 [tls]
-# Use auto-generated self-signed certificate and key
-self_sign = false
 # Path to certificate file (relative to data_dir if not absolute)
-certificate = ""
+certificate = "/path/to/cert.pem"
 # Path to private key file (relative to data_dir if not absolute)
-private_key = ""
+private_key = "/path/to/key.pem"
 # ALPN protocols (e.g. ["h3"])
 alpn = []
-# Domain name for certificate issuance or self-sign
-hostname = "localhost"
-# Enable built-in ACME automatic SSL certificate provisioning
-auto_ssl = false
 
 [quic]
 # Congestion control configuration
@@ -233,27 +227,9 @@ allow_udp = false
 
 TLS is required for secure connections.
 
-### Built-in ACME Support
+### Using External Certificate Tools
 
-`tuic-server` includes built-in ACME support for automatic SSL certificate provisioning via Let's Encrypt. This allows the server to automatically obtain and renew certificates without external tools.
-
-To enable built-in ACME, set the following options in your configuration:
-
-```toml
-[tls]
-auto_ssl = true
-hostname = "your.domain.com" # The domain name for certificate issuance
-```
-
-**Notes:**
-- The server must be accessible from the public internet on port 80 for ACME HTTP-01 challenge.
-- If running as a non-root user on Linux, you may need to allow binding to privileged ports:
-  ```sh
-  setcap CAP_NET_BIND_SERVICE=+eip <path to tuic-server binary>
-  ```
-- If ACME provisioning fails, tuic-server will fall back to self-signed certificates if configured.
-
-You can also use [acme.sh](https://github.com/acmesh-official/acme.sh) or other tools to manually obtain certificates:
+You can use [acme.sh](https://github.com/acmesh-official/acme.sh) or other tools to obtain certificates:
 
 ```sh
 acme.sh --issue -d www.yourdomain.org --standalone
@@ -261,8 +237,6 @@ acme.sh --install-cert -d www.yourdomain.org \
   --key-file       /CERT_PATH/key.crt  \
   --fullchain-file /CERT_PATH/cert.crt
 ```
-
-Alternatively, you may use self-signed certificates or provide your own.
 
 ---
 
