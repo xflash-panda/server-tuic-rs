@@ -112,21 +112,12 @@ pub struct Config {
 	pub experimental: ExperimentalConfig,
 
 	/// Old configuration fields
-	#[serde(default, rename = "self_sign")]
-	#[deprecated]
-	pub __self_sign:          Option<bool>,
 	#[serde(default, rename = "certificate")]
 	#[deprecated]
 	pub __certificate:        Option<PathBuf>,
 	#[serde(default, rename = "private_key")]
 	#[deprecated]
 	pub __private_key:        Option<PathBuf>,
-	#[serde(default, rename = "auto_ssl")]
-	#[deprecated]
-	pub __auto_ssl:           Option<bool>,
-	#[serde(default, rename = "hostname")]
-	#[deprecated]
-	pub __hostname:           Option<String>,
 	#[serde(default, rename = "congestion_control")]
 	#[deprecated]
 	pub __congestion_control: Option<CongestionController>,
@@ -163,17 +154,10 @@ pub struct Config {
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct TlsConfig {
-	pub self_sign:   bool,
 	#[educe(Default(expression = ""))]
 	pub certificate: PathBuf,
 	#[educe(Default(expression = ""))]
 	pub private_key: PathBuf,
-	#[educe(Default(expression = Vec::new()))]
-	pub alpn:        Vec<String>,
-	#[educe(Default(expression = "localhost"))]
-	pub hostname:    String,
-	#[educe(Default(expression = false))]
-	pub auto_ssl:    bool,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -294,23 +278,11 @@ impl Config {
 		// Migrate TLS-related fields
 		#[allow(deprecated)]
 		{
-			if let Some(self_sign) = self.__self_sign {
-				self.tls.self_sign = self_sign;
-			}
 			if let Some(certificate) = self.__certificate.take() {
 				self.tls.certificate = certificate;
 			}
 			if let Some(private_key) = self.__private_key.take() {
 				self.tls.private_key = private_key;
-			}
-			if let Some(auto_ssl) = self.__auto_ssl {
-				self.tls.auto_ssl = auto_ssl;
-			}
-			if let Some(hostname) = self.__hostname.take() {
-				self.tls.hostname = hostname;
-			}
-			if let Some(alpn) = self.__alpn.take() {
-				self.tls.alpn = alpn;
 			}
 		}
 
@@ -481,21 +453,13 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 
 	// Determine certificate and key paths
 	let base_dir = config.data_dir.clone();
-	config.tls.certificate = if config.tls.auto_ssl && config.tls.certificate.to_str() == Some("") {
-		config.data_dir.join(format!("{}.cer.pem", config.tls.hostname))
-	} else if config.tls.certificate.is_relative() {
-		config.data_dir.join(&config.tls.certificate)
-	} else {
-		config.tls.certificate.clone()
-	};
+	if config.tls.certificate.is_relative() && config.tls.certificate.to_str() != Some("") {
+		config.tls.certificate = config.data_dir.join(&config.tls.certificate);
+	}
 
-	config.tls.private_key = if config.tls.auto_ssl && config.tls.private_key.to_str() == Some("") {
-		config.data_dir.join(format!("{}.key.pem", config.tls.hostname))
-	} else if config.tls.private_key.is_relative() {
-		base_dir.join(&config.tls.private_key)
-	} else {
-		config.tls.private_key.clone()
-	};
+	if config.tls.private_key.is_relative() && config.tls.private_key.to_str() != Some("") {
+		config.tls.private_key = base_dir.join(&config.tls.private_key);
+	}
 
 	Ok(config)
 }
@@ -539,9 +503,6 @@ mod tests {
 		assert!(!result.udp_relay_ipv6);
 		assert!(result.zero_rtt_handshake);
 
-		assert!(result.tls.self_sign);
-		assert!(result.tls.auto_ssl);
-		assert_eq!(result.tls.hostname, "testhost");
 		assert_eq!(result.quic.initial_mtu, 1400);
 		assert_eq!(result.quic.min_mtu, 1300);
 		assert_eq!(result.quic.send_window, 10000000);
@@ -579,29 +540,6 @@ mod tests {
 
 		// Cleanup test directories
 		let _ = tokio::fs::remove_dir_all("__test__relative_path").await;
-	}
-
-	#[tokio::test]
-	async fn test_auto_ssl_path_generation() {
-		let config = include_str!("../tests/config/auto_ssl_path_generation.toml");
-
-		let result = test_parse_config(config).await.unwrap();
-
-		let expected_cert = env::current_dir()
-			.unwrap()
-			.join("__test__ssl_data")
-			.join("example.com.cer.pem");
-
-		let expected_key = env::current_dir()
-			.unwrap()
-			.join("__test__ssl_data")
-			.join("example.com.key.pem");
-
-		assert_eq!(result.tls.certificate, expected_cert);
-		assert_eq!(result.tls.private_key, expected_key);
-
-		// Cleanup test directories
-		let _ = tokio::fs::remove_dir_all("__test__ssl_data").await;
 	}
 
 	#[tokio::test]

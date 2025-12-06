@@ -34,7 +34,6 @@ impl Server {
 			.with_no_client_auth()
 			.with_cert_resolver(cert_resolver);
 
-		crypto.alpn_protocols = ctx.cfg.tls.alpn.iter().cloned().map(|alpn| alpn.into_bytes()).collect();
 		// TODO only set when 0-RTT enabled
 		crypto.max_early_data_size = u32::MAX;
 		crypto.send_half_rtt_data = ctx.cfg.zero_rtt_handshake;

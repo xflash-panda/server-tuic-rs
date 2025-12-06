@@ -147,8 +147,6 @@ f0e12827-fe60-458c-8269-a05ccb0ff8da = 1
 certificate = "/path/to/cert.pem"
 # Path to private key file (relative to data_dir if not absolute)
 private_key = "/path/to/key.pem"
-# ALPN protocols (e.g. ["h3"])
-alpn = []
 
 [quic]
 # Congestion control configuration
