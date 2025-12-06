@@ -40,9 +40,9 @@ impl std::error::Error for Control {}
 #[command(name = "tuic-server")]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
-	/// Path to the config file
-	#[arg(short, long, value_name = "PATH")]
-	pub config: Option<PathBuf>,
+	/// Path to the external config file (optional)
+	#[arg(long, value_name = "PATH")]
+	pub ext_conf_file: Option<PathBuf>,
 
 	/// Generate an example configuration file (config.toml)
 	#[arg(short, long)]
@@ -375,18 +375,16 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 		return Err(Control("Done").into());
 	}
 
-	// Get config path from --config
-	let cfg_path = cli.config.ok_or_else(|| {
-		eyre::eyre!("Config file is required. Use -c/--config to specify the path, or -h for help.")
-	})?;
+	// Start with default config
+	let mut figment = Figment::from(Serialized::defaults(Config::default()));
 
-	// Check if config file exists
-	if !cfg_path.exists() {
-		return Err(eyre::eyre!("Config file not found: {}", cfg_path.display()));
+	// Merge external config file if provided
+	if let Some(cfg_path) = &cli.ext_conf_file {
+		if !cfg_path.exists() {
+			return Err(eyre::eyre!("Config file not found: {}", cfg_path.display()));
+		}
+		figment = figment.merge(Toml::file(cfg_path));
 	}
-
-	let figment = Figment::from(Serialized::defaults(Config::default()))
-		.merge(Toml::file(&cfg_path));
 
 	let mut config: Config = figment.extract()?;
 
@@ -419,7 +417,7 @@ mod tests {
 		// Temporarily set command line arguments for clap to parse
 		let os_args = vec![
 			"test_binary".to_owned(),
-			"--config".to_owned(),
+			"--ext-conf-file".to_owned(),
 			config_path.to_string_lossy().into_owned(),
 		];
 
@@ -461,20 +459,20 @@ mod tests {
 		assert!(result.is_err());
 
 		// Test non-existent configuration files - should fail when trying to parse
-		let result = Cli::try_parse_from(vec!["test_binary", "--config", "non_existent.toml"]);
+		let result = Cli::try_parse_from(vec!["test_binary", "--ext-conf-file", "non_existent.toml"]);
 		// This will succeed at parsing CLI level, but fail when actually loading the
 		// file
 		if let Ok(cli) = result {
-			assert!(cli.config.is_some());
-			assert!(!cli.config.unwrap().exists());
+			assert!(cli.ext_conf_file.is_some());
+			assert!(!cli.ext_conf_file.unwrap().exists());
 		}
 
-		// Test missing configuration file parameters - should fail at CLI parsing level
+		// Test missing configuration file parameters - should succeed with defaults
 		let result = Cli::try_parse_from(vec!["test_binary"]);
-		// This should succeed because --config is optional in CLI definition
+		// This should succeed because --ext_conf_file is optional
 		assert!(result.is_ok());
 		let cli = result.unwrap();
-		assert!(cli.config.is_none());
+		assert!(cli.ext_conf_file.is_none());
 	}
 
 	#[tokio::test]
