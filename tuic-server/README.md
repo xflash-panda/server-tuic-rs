@@ -71,6 +71,7 @@ tuic-server --init
 | `-c, --config <PATH>` | Path to the config file | Required |
 | `--cert-file <PATH>` | Path to the certificate file | `/root/.cert/server.crt` |
 | `--key-file <PATH>` | Path to the private key file | `/root/.cert/server.key` |
+| `--log-level <LEVEL>` | Log level (trace, debug, info, warn, error, off) | `info` |
 | `-i, --init` | Generate example configuration file | - |
 
 ---
@@ -82,9 +83,6 @@ Configuration files use the TOML format with `.toml` file extension.
 ### Example configuration
 
 ```toml
-# Logging level: trace, debug, info, warn, error, off
-log_level = "info"
-
 # Socket address to listen on
 server = "[::]:443"
 

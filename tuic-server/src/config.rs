@@ -5,7 +5,7 @@ use std::{
 	time::Duration,
 };
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use educe::Educe;
 use figment::{
 	Figment,
@@ -55,17 +55,23 @@ pub struct Cli {
 	/// Path to the private key file
 	#[arg(long, value_name = "PATH", default_value = "/root/.cert/server.key")]
 	pub key_file: PathBuf,
+
+	/// Log level
+	#[arg(long, value_name = "LEVEL", default_value = "info")]
+	pub log_level: LogLevel,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
-	pub log_level: LogLevel,
 	#[educe(Default(expression = "[::]:8443".parse().unwrap()))]
-	pub server:    SocketAddr,
-	pub users:     HashMap<Uuid, u64>,
+	pub server: SocketAddr,
+	pub users:  HashMap<Uuid, u64>,
 
+	/// Log level (set from CLI, not config file)
+	#[serde(skip)]
+	pub log_level: LogLevel,
 	/// Certificate file path (set from CLI, not config file)
 	#[serde(skip)]
 	pub cert_file: PathBuf,
@@ -332,7 +338,7 @@ impl Config {
 	}
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 #[derive(Educe)]
 #[educe(Default)]
@@ -387,7 +393,8 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 	// Migrate legacy fields to new nested structure
 	config.migrate();
 
-	// Set certificate and key paths from CLI arguments
+	// Set CLI arguments into config
+	config.log_level = cli.log_level;
 	config.cert_file = cli.cert_file;
 	config.key_file = cli.key_file;
 
@@ -428,7 +435,6 @@ mod tests {
 
 		let result = test_parse_config(config).await.unwrap();
 
-		assert_eq!(result.log_level, LogLevel::Warn);
 		assert_eq!(result.server, "127.0.0.1:8080".parse().unwrap());
 		assert!(!result.udp_relay_ipv6);
 		assert!(result.zero_rtt_handshake);
@@ -624,7 +630,6 @@ mod tests {
 		let result = test_parse_config(config).await.unwrap();
 
 		// Check default values
-		assert_eq!(result.log_level, LogLevel::Info);
 		assert_eq!(result.server, "[::]:8443".parse().unwrap());
 		assert!(result.udp_relay_ipv6);
 		assert!(!result.zero_rtt_handshake);
