@@ -44,11 +44,6 @@ pub struct Cli {
 	#[arg(short, long, value_name = "PATH")]
 	pub config: Option<PathBuf>,
 
-	/// Directory to search for config file (uses first recognizable config file
-	/// found)
-	#[arg(short, long, value_name = "DIR")]
-	pub dir: Option<PathBuf>,
-
 	/// Generate an example configuration file (config.toml)
 	#[arg(short, long)]
 	pub init: bool,
@@ -370,44 +365,6 @@ impl From<LogLevel> for LevelFilter {
 }
 
 
-/// Find the first TOML config file in a directory
-async fn find_config_in_dir(dir: &PathBuf) -> eyre::Result<PathBuf> {
-	if !dir.exists() {
-		return Err(eyre::eyre!("Directory not found: {}", dir.display()));
-	}
-
-	if !dir.is_dir() {
-		return Err(eyre::eyre!("Path is not a directory: {}", dir.display()));
-	}
-
-	let mut entries = tokio::fs::read_dir(dir).await?;
-	let mut config_files = Vec::new();
-
-	// Collect all TOML config files
-	while let Some(entry) = entries.next_entry().await? {
-		let path = entry.path();
-		if path.is_file() {
-			if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-				if ext.to_lowercase() == "toml" {
-					config_files.push(path);
-				}
-			}
-		}
-	}
-
-	if config_files.is_empty() {
-		return Err(eyre::eyre!(
-			"No TOML config file found in directory: {}",
-			dir.display()
-		));
-	}
-
-	// Sort to ensure consistent behavior (alphabetical order)
-	config_files.sort();
-
-	Ok(config_files[0].clone())
-}
-
 pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 	// Handle --init flag
 	if cli.init {
@@ -418,16 +375,10 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 		return Err(Control("Done").into());
 	}
 
-	// Determine config path: either from --config or --dir
-	let cfg_path = if let Some(config) = cli.config {
-		config
-	} else if let Some(dir) = cli.dir {
-		find_config_in_dir(&dir).await?
-	} else {
-		return Err(eyre::eyre!(
-			"Config file is required. Use -c/--config to specify the path, -d/--dir to specify a directory, or -h for help."
-		));
-	};
+	// Get config path from --config
+	let cfg_path = cli.config.ok_or_else(|| {
+		eyre::eyre!("Config file is required. Use -c/--config to specify the path, or -h for help.")
+	})?;
 
 	// Check if config file exists
 	if !cfg_path.exists() {
@@ -790,132 +741,6 @@ mod tests {
 
 		let result = test_parse_config(config_new_reno).await.unwrap();
 		assert_eq!(result.quic.congestion_control.controller, CongestionController::NewReno);
-	}
-
-	#[tokio::test]
-	async fn test_dir_parameter_finds_config() {
-		// Test that --dir finds the first config file in a directory
-		let temp_dir = tempdir().unwrap();
-		let dir_path = temp_dir.path();
-
-		// Create config file
-		let config_content = r#"
-			log_level = "info"
-			server = "127.0.0.1:8080"
-			[users]
-		"#;
-
-		fs::write(dir_path.join("config.toml"), config_content).unwrap();
-
-		let os_args = vec![
-			"test_binary".to_owned(),
-			"--dir".to_owned(),
-			dir_path.to_string_lossy().into_owned(),
-		];
-
-		let cli = Cli::try_parse_from(os_args).unwrap();
-		let result = parse_config(cli).await;
-
-		assert!(result.is_ok());
-		let config = result.unwrap();
-		assert_eq!(config.log_level, LogLevel::Info);
-		assert_eq!(config.server, "127.0.0.1:8080".parse().unwrap());
-	}
-
-	#[tokio::test]
-	async fn test_dir_parameter_alphabetical_order() {
-		// Test that --dir picks the first file alphabetically
-		let temp_dir = tempdir().unwrap();
-		let dir_path = temp_dir.path();
-
-		// Create files that would sort alphabetically
-		let config_a = r#"log_level = "debug""#;
-		let config_z = r#"log_level = "error""#;
-
-		fs::write(dir_path.join("z_config.toml"), config_z).unwrap();
-		fs::write(dir_path.join("a_config.toml"), config_a).unwrap();
-
-		let os_args = vec![
-			"test_binary".to_owned(),
-			"--dir".to_owned(),
-			dir_path.to_string_lossy().into_owned(),
-		];
-
-		let cli = Cli::try_parse_from(os_args).unwrap();
-		let result = parse_config(cli).await.unwrap();
-
-		// Should pick a_config.toml which has debug level
-		assert_eq!(result.log_level, LogLevel::Debug);
-	}
-
-	#[tokio::test]
-	async fn test_dir_parameter_no_config_found() {
-		// Test that --dir fails when no config files exist
-		let temp_dir = tempdir().unwrap();
-		let dir_path = temp_dir.path();
-
-		// Create a non-config file
-		fs::write(dir_path.join("readme.txt"), "not a config").unwrap();
-
-		let os_args = vec![
-			"test_binary".to_owned(),
-			"--dir".to_owned(),
-			dir_path.to_string_lossy().into_owned(),
-		];
-
-		let cli = Cli::try_parse_from(os_args).unwrap();
-		let result = parse_config(cli).await;
-
-		assert!(result.is_err());
-		if let Err(err) = result {
-			assert!(err.to_string().contains("No TOML config file found"));
-		}
-	}
-
-	#[tokio::test]
-	async fn test_dir_parameter_nonexistent_directory() {
-		// Test that --dir fails when directory doesn't exist
-		let os_args = vec![
-			"test_binary".to_owned(),
-			"--dir".to_owned(),
-			"/nonexistent/directory/path".to_owned(),
-		];
-
-		let cli = Cli::try_parse_from(os_args).unwrap();
-		let result = parse_config(cli).await;
-
-		assert!(result.is_err());
-		if let Err(err) = result {
-			assert!(err.to_string().contains("Directory not found"));
-		}
-	}
-
-	#[tokio::test]
-	async fn test_config_parameter_takes_precedence() {
-		// Test that --config takes precedence over --dir
-		let temp_dir = tempdir().unwrap();
-		let dir_path = temp_dir.path();
-
-		let config_in_dir = r#"log_level = "error""#;
-		let config_explicit = r#"log_level = "warn""#;
-
-		fs::write(dir_path.join("dir_config.toml"), config_in_dir).unwrap();
-		let explicit_path = dir_path.join("explicit.toml");
-		fs::write(&explicit_path, config_explicit).unwrap();
-
-		let os_args = vec![
-			"test_binary".to_owned(),
-			"--config".to_owned(),
-			explicit_path.to_string_lossy().into_owned(),
-			"--dir".to_owned(),
-			dir_path.to_string_lossy().into_owned(),
-		];
-
-		let cli = Cli::try_parse_from(os_args).unwrap();
-		let result = parse_config(cli).await.unwrap();
-
-		// Should use explicit config, not dir
-		assert_eq!(result.log_level, LogLevel::Warn);
 	}
 
 }
