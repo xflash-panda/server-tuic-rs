@@ -6,6 +6,7 @@ use std::{
 	sync::{Arc, atomic::AtomicUsize},
 };
 
+use tokio::sync::broadcast;
 use tracing::{info, warn};
 
 pub mod acl;
@@ -29,6 +30,7 @@ pub type TrafficStats = (AtomicUsize, AtomicUsize, AtomicUsize);
 pub struct AppContext {
 	pub cfg:           Config,
 	pub traffic_stats: HashMap<u64, TrafficStats>,
+	pub shutdown_tx:   broadcast::Sender<()>,
 }
 
 /// Run the TUIC server with the given configuration
@@ -53,7 +55,14 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 		traffic_stats.insert(*uid, (AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0)));
 	}
 
-	let ctx = Arc::new(AppContext { traffic_stats, cfg });
+	// Create shutdown signal channel
+	let (shutdown_tx, _) = broadcast::channel::<()>(1);
+
+	let ctx = Arc::new(AppContext {
+		traffic_stats,
+		cfg,
+		shutdown_tx: shutdown_tx.clone(),
+	});
 
 	// Spawn panel service run task
 	let panel_for_run = panel_service.clone();
@@ -65,13 +74,54 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 
 	// Initialize and start server
 	let server = server::Server::init(ctx.clone()).await?;
-	server.start().await;
 
-	// Close panel service when server stops
+	// Wait for either server completion or shutdown signal
+	tokio::select! {
+		_ = server.start() => {
+			info!("Server stopped");
+		}
+		_ = wait_for_shutdown_signal() => {
+			info!("Shutdown signal received, stopping server...");
+			// Send shutdown signal to all components
+			let _ = shutdown_tx.send(());
+		}
+	}
+
+	// Close panel service gracefully
+	info!("Closing panel service...");
 	panel_service.close().await?;
 
 	// Wait for panel task to finish
 	let _ = panel_handle.await;
 
+	info!("Server shutdown complete");
 	Ok(())
+}
+
+/// Wait for shutdown signal (SIGINT or SIGTERM)
+async fn wait_for_shutdown_signal() {
+	#[cfg(unix)]
+	{
+		use tokio::signal::unix::{SignalKind, signal};
+
+		let mut sigint = signal(SignalKind::interrupt()).expect("Failed to register SIGINT handler");
+		let mut sigterm = signal(SignalKind::terminate()).expect("Failed to register SIGTERM handler");
+
+		tokio::select! {
+			_ = sigint.recv() => {
+				info!("Received SIGINT");
+			}
+			_ = sigterm.recv() => {
+				info!("Received SIGTERM");
+			}
+		}
+	}
+
+	#[cfg(not(unix))]
+	{
+		tokio::signal::ctrl_c()
+			.await
+			.expect("Failed to listen for Ctrl-C");
+		info!("Received Ctrl-C");
+	}
 }

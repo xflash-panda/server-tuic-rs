@@ -44,21 +44,8 @@ async fn main() -> eyre::Result<()> {
 				)),
 		)
 		.try_init()?;
-	tokio::select! {
-		res = tuic_server::run(cfg) => {
-			if let Err(err) = res {
-				tracing::error!("Server exited with error: {err}");
-				return Err(err);
-			}
-		}
-		res = tokio::signal::ctrl_c() => {
-			if let Err(err) = res {
-				tracing::error!("Failed to listen for Ctrl-C: {err}");
-				return Err(eyre::eyre!("Failed to listen for Ctrl-C: {err}"));
-			} else {
-				tracing::info!("Received Ctrl-C, shutting down.");
-			}
-		}
-	}
+
+	tuic_server::run(cfg).await?;
+
 	Ok(())
 }
