@@ -10,7 +10,6 @@ use tokio::sync::broadcast;
 use tracing::{error, info, warn};
 
 pub mod acl;
-pub mod compat;
 pub mod config;
 pub mod connection;
 pub mod error;
