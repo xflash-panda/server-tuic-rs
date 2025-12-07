@@ -6,9 +6,7 @@ use std::{
 	sync::{Arc, atomic::AtomicUsize},
 };
 
-use moka::future::Cache;
 use tracing::{info, warn};
-use uuid::Uuid;
 
 pub mod acl;
 pub mod compat;
@@ -25,11 +23,12 @@ pub mod utils;
 pub use config::{Cli, Config, Control};
 pub use panel::{OptionalPanel, Panel, PanelService};
 
+/// Traffic statistics tuple: (tx_bytes, rx_bytes, connection_count)
+pub type TrafficStats = (AtomicUsize, AtomicUsize, AtomicUsize);
+
 pub struct AppContext {
-	pub cfg:            Config,
-	pub online_counter: HashMap<u64, AtomicUsize>,
-	pub online_clients: Cache<Uuid, Arc<Cache<usize, compat::QuicClient>>>,
-	pub traffic_stats:  HashMap<u64, (AtomicUsize, AtomicUsize)>,
+	pub cfg:           Config,
+	pub traffic_stats: HashMap<u64, TrafficStats>,
 }
 
 /// Run the TUIC server with the given configuration
@@ -49,22 +48,12 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 	// Initialize panel service before server starts
 	panel_service.init().await?;
 
-	let mut online_counter = HashMap::new();
-	for (_, uid) in cfg.users.iter() {
-		online_counter.insert(*uid, AtomicUsize::new(0));
-	}
-
 	let mut traffic_stats = HashMap::new();
 	for (_, uid) in cfg.users.iter() {
-		traffic_stats.insert(*uid, (AtomicUsize::new(0), AtomicUsize::new(0)));
+		traffic_stats.insert(*uid, (AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0)));
 	}
 
-	let ctx = Arc::new(AppContext {
-		online_counter,
-		online_clients: Cache::new(cfg.users.len() as u64),
-		traffic_stats,
-		cfg,
-	});
+	let ctx = Arc::new(AppContext { traffic_stats, cfg });
 
 	// Spawn panel service run task
 	let panel_for_run = panel_service.clone();
