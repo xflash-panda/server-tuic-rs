@@ -38,9 +38,10 @@ async fn main() -> eyre::Result<()> {
 		.with(
 			tracing_subscriber::fmt::layer()
 				.with_target(true)
-				.with_timer(LocalTime::new(time::macros::format_description!(
-					"[year repr:last_two]-[month]-[day] [hour]:[minute]:[second]"
-				))),
+				.with_timer(LocalTime::new(
+					time::format_description::parse("[year repr:last_two]-[month]-[day] [hour]:[minute]:[second]")
+						.unwrap(),
+				)),
 		)
 		.try_init()?;
 	tokio::select! {
