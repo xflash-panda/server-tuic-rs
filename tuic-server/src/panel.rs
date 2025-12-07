@@ -29,6 +29,12 @@ pub struct PanelConfig {
 	pub node_id: u32,
 	/// Request timeout in seconds
 	pub timeout: u64,
+	/// Interval for fetching users from API (in seconds)
+	pub fetch_users_interval: u64,
+	/// Interval for reporting traffic stats to API (in seconds)
+	pub report_traffics_interval: u64,
+	/// Interval for sending heartbeat to API (in seconds)
+	pub heartbeat_interval: u64,
 }
 
 /// Panel service implementation using server-r-client

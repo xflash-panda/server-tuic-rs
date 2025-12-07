@@ -71,6 +71,18 @@ pub struct Cli {
 	/// Node ID
 	#[arg(long, value_name = "ID")]
 	pub node: Option<u32>,
+
+	/// API request cycle for fetching users (in seconds)
+	#[arg(long, value_name = "SECONDS", default_value = "60")]
+	pub fetch_users_interval: u64,
+
+	/// API request cycle for reporting traffic stats (in seconds)
+	#[arg(long, value_name = "SECONDS", default_value = "80")]
+	pub report_traffics_interval: u64,
+
+	/// API request cycle for heartbeat (in seconds)
+	#[arg(long, value_name = "SECONDS", default_value = "180")]
+	pub heartbeat_interval: u64,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -421,6 +433,9 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 			token,
 			node_id,
 			timeout: 30,
+			fetch_users_interval: cli.fetch_users_interval,
+			report_traffics_interval: cli.report_traffics_interval,
+			heartbeat_interval: cli.heartbeat_interval,
 		});
 	}
 
