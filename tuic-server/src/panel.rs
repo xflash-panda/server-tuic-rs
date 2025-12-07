@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use server_r_client::{
 	ApiClient, ApiError, Config as ApiConfig, NodeConfigEnum, NodeType, RegisterRequest,
@@ -44,6 +44,8 @@ pub struct PanelConfig {
 	pub report_traffics_interval: u64,
 	/// Interval for sending heartbeat to API (in seconds)
 	pub heartbeat_interval: u64,
+	/// Data directory for persisting state and other data
+	pub data_dir: PathBuf,
 }
 
 /// User data stored in Panel

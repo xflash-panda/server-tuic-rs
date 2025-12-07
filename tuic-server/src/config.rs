@@ -81,6 +81,10 @@ pub struct Cli {
 	/// API request cycle for heartbeat (in seconds)
 	#[arg(long, value_name = "SECONDS", default_value = "180")]
 	pub heartbeat_interval: u64,
+
+	/// Data directory for persisting state and other data
+	#[arg(long, value_name = "PATH", default_value = "/var/lib/tuic-node")]
+	pub data_dir: PathBuf,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -433,6 +437,7 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 			fetch_users_interval: cli.fetch_users_interval,
 			report_traffics_interval: cli.report_traffics_interval,
 			heartbeat_interval: cli.heartbeat_interval,
+			data_dir: cli.data_dir,
 		});
 	}
 
