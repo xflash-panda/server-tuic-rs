@@ -33,6 +33,9 @@ quinn = { version = "0.11", default-features = false, features = ["runtime-tokio
 tuic-core = { path = "../tuic-core", default-features = false, features = ["async_marshal", "marshal", "model"] }
 register-count = { version = "0.1.0", default-features = false, features = ["std"] }
 
+# Panel API Client
+server-r-client = { git = "https://github.com/xflash-panda/server-r-client.git", branch = "dev" }
+
 # Tokio/Async
 tokio = { version = "1", default-features = false, features = ["io-util", "macros", "net", "parking_lot", "rt-multi-thread", "time", "fs", "signal"] }
 
@@ -63,6 +66,9 @@ tracing = "0.1"
 # Error handling
 thiserror = { version = "2", default-features = false }
 eyre = { version = "0.6" }
+
+# Async trait
+async-trait = "0.1"
 
 tikv-jemallocator = { version = "0.6", optional = true }
 

@@ -59,6 +59,18 @@ pub struct Cli {
 	/// Log level
 	#[arg(long, value_name = "LEVEL", default_value = "info")]
 	pub log_level: LogLevel,
+
+	/// Server address (e.g., "https://api.example.com")
+	#[arg(long, value_name = "URL")]
+	pub api: Option<String>,
+
+	/// Token of server API
+	#[arg(long, value_name = "TOKEN")]
+	pub token: Option<String>,
+
+	/// Node ID
+	#[arg(long, value_name = "ID")]
+	pub node: Option<u32>,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -78,6 +90,10 @@ pub struct Config {
 	/// Private key file path (set from CLI, not config file)
 	#[serde(skip)]
 	pub key_file: PathBuf,
+
+	/// Panel configuration (set from CLI, not config file)
+	#[serde(skip)]
+	pub panel: Option<crate::panel::PanelConfig>,
 
 	pub quic: QuicConfig,
 
@@ -395,6 +411,18 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 	config.log_level = cli.log_level;
 	config.cert_file = cli.cert_file;
 	config.key_file = cli.key_file;
+
+	// Set panel configuration if all required fields are provided
+	if let (Some(api_host), Some(token), Some(node_id)) =
+		(cli.api, cli.token, cli.node)
+	{
+		config.panel = Some(crate::panel::PanelConfig {
+			api_host,
+			token,
+			node_id,
+			timeout: 30,
+		});
+	}
 
 	Ok(config)
 }

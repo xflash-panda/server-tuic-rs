@@ -1942,7 +1942,7 @@ dependencies = [
 [[package]]
 name = "server-r-client"
 version = "0.1.0"
-source = "git+https://github.com/xflash-panda/server-r-client?branch=dev#283bd70cf023f3bde4e036bf3965eabebacfc259"
+source = "git+https://github.com/xflash-panda/server-r-client.git?branch=dev#283bd70cf023f3bde4e036bf3965eabebacfc259"
 dependencies = [
  "reqwest",
  "serde",
@@ -2563,6 +2563,7 @@ name = "tuic-server"
 version = "1.6.5"
 dependencies = [
  "arc-swap",
+ "async-trait",
  "aws-lc-rs",
  "bytes",
  "clap",
@@ -2584,6 +2585,7 @@ dependencies = [
  "rustls",
  "rustls-pemfile",
  "serde",
+ "server-r-client",
  "socket2 0.6.1",
  "tempfile",
  "thiserror 2.0.17",
