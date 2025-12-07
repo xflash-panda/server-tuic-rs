@@ -2,7 +2,7 @@ use std::{
 	fmt::{Display, Formatter, Result as FmtResult},
 	sync::{
 		Arc,
-		atomic::{AtomicBool, AtomicU64, Ordering},
+		atomic::{AtomicBool, AtomicI64, Ordering},
 	},
 };
 
@@ -17,7 +17,7 @@ struct AuthenticatedInner {
 	/// uuid that waiting for auth
 	uuid:             ArcSwapOption<Uuid>,
 	/// uid for statistics (set after successful auth)
-	uid:              AtomicU64,
+	uid:              AtomicI64,
 	notify:           Notify,
 	is_authenticated: AtomicBool,
 }
@@ -27,14 +27,14 @@ impl Authenticated {
 	pub fn new() -> Self {
 		Self(Arc::new(AuthenticatedInner {
 			uuid:             ArcSwapOption::new(None),
-			uid:              AtomicU64::new(0),
+			uid:              AtomicI64::new(0),
 			notify:           Notify::new(),
 			is_authenticated: AtomicBool::new(false),
 		}))
 	}
 
 	/// invoking 'set' means auth success
-	pub async fn set(&self, uuid: Uuid, uid: u64) {
+	pub async fn set(&self, uuid: Uuid, uid: i64) {
 		self.0.uuid.store(Some(Arc::new(uuid)));
 		self.0.uid.store(uid, Ordering::SeqCst);
 
@@ -48,7 +48,7 @@ impl Authenticated {
 	}
 
 	/// Get the UID (only valid after successful authentication)
-	pub fn get_uid(&self) -> u64 {
+	pub fn get_uid(&self) -> i64 {
 		self.0.uid.load(Ordering::SeqCst)
 	}
 

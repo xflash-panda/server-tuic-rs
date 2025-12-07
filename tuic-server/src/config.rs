@@ -1,5 +1,4 @@
 use std::{
-	collections::HashMap,
 	net::{Ipv4Addr, Ipv6Addr, SocketAddr},
 	path::PathBuf,
 	time::Duration,
@@ -13,7 +12,6 @@ use figment::{
 };
 use serde::{Deserialize, Serialize};
 use tracing::{level_filters::LevelFilter, warn};
-use uuid::Uuid;
 
 #[cfg(test)]
 use crate::acl::{AclAddress, AclPorts};
@@ -91,7 +89,11 @@ pub struct Cli {
 pub struct Config {
 	#[educe(Default(expression = "[::]:8443".parse().unwrap()))]
 	pub server: SocketAddr,
-	pub users:  HashMap<Uuid, u64>,
+
+	/// Users config (deprecated, now fetched from panel API)
+	#[serde(default, skip_serializing, rename = "users")]
+	#[deprecated]
+	pub __users: Option<serde::de::IgnoredAny>,
 
 	/// Log level (set from CLI, not config file)
 	#[serde(skip)]
@@ -345,11 +347,6 @@ impl Config {
 
 	pub fn full_example() -> Self {
 		Self {
-			users: {
-				let mut users = HashMap::new();
-				users.insert(Uuid::new_v4(), 1);
-				users
-			},
 			// Provide a minimal outbound example
 			outbound: OutboundConfig {
 				default: OutboundRule {
@@ -486,10 +483,8 @@ mod tests {
 		assert_eq!(result.quic.congestion_control.controller, CongestionController::Bbr);
 		assert_eq!(result.quic.congestion_control.initial_window, 2000000);
 
-		let uuid1 = Uuid::parse_str("123e4567-e89b-12d3-a456-426614174000").unwrap();
-		let uuid2 = Uuid::parse_str("123e4567-e89b-12d3-a456-426614174001").unwrap();
-		assert_eq!(result.users.get(&uuid1), Some(&1));
-		assert_eq!(result.users.get(&uuid2), Some(&2));
+		// Users are now fetched from panel API, not config file
+		// The users field in config is deprecated and ignored
 
 		Ok(())
 	}
@@ -684,10 +679,13 @@ mod tests {
 	}
 	#[tokio::test]
 	async fn test_invalid_uuid() {
+		// Users are now fetched from panel API, not config file
+		// The users field is deprecated and ignored, so invalid UUIDs don't cause errors
 		let config = include_str!("../tests/config/invalid_uuid.toml");
 
 		let result = test_parse_config(config).await;
-		assert!(result.is_err());
+		// Should succeed now since users field is ignored
+		assert!(result.is_ok());
 	}
 
 	#[tokio::test]

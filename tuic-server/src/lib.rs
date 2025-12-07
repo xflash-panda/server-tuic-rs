@@ -6,7 +6,7 @@ use std::{
 	sync::{Arc, atomic::AtomicUsize},
 };
 
-use tokio::sync::broadcast;
+use tokio::sync::{RwLock, broadcast};
 use tracing::{error, info, warn};
 
 pub mod acl;
@@ -28,7 +28,9 @@ pub type TrafficStats = (AtomicUsize, AtomicUsize, AtomicUsize);
 
 pub struct AppContext {
 	pub cfg:           Config,
-	pub traffic_stats: HashMap<u64, TrafficStats>,
+	/// Traffic statistics per user, dynamically initialized on first access
+	pub traffic_stats: RwLock<HashMap<i64, TrafficStats>>,
+	pub panel_service: Arc<OptionalPanel>,
 	pub shutdown_tx:   broadcast::Sender<()>,
 }
 
@@ -63,17 +65,14 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 
 /// Inner run function that can return early on error
 async fn run_inner(panel_service: Arc<OptionalPanel>, cfg: Config) -> eyre::Result<()> {
-	let mut traffic_stats = HashMap::new();
-	for (_, uid) in cfg.users.iter() {
-		traffic_stats.insert(*uid, (AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0)));
-	}
-
 	// Create shutdown signal channel
 	let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
+	// Traffic stats are initialized dynamically on first access
 	let ctx = Arc::new(AppContext {
-		traffic_stats,
+		traffic_stats: RwLock::new(HashMap::new()),
 		cfg,
+		panel_service: panel_service.clone(),
 		shutdown_tx: shutdown_tx.clone(),
 	});
 

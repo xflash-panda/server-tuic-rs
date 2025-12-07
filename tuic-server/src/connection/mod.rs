@@ -121,8 +121,8 @@ impl Connection {
 	async fn authenticate(&self, auth: &Authenticate) -> Result<(), Error> {
 		if self.auth.get().is_some() {
 			Err(Error::DuplicatedAuth)
-		} else if let Some(&uid) = self.ctx.cfg.users.get(&auth.uuid()) {
-			// UUID exists - authentication successful (UUID acts as password)
+		} else if let Some(uid) = self.ctx.panel_service.validate_user(&auth.uuid()).await {
+			// UUID exists in panel - authentication successful
 			self.auth.set(auth.uuid(), uid).await;
 			Ok(())
 		} else {

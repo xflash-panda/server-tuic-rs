@@ -1,10 +1,11 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use server_r_client::{
-	ApiClient, Config as ApiConfig, NodeConfigEnum, NodeType, RegisterRequest,
+	ApiClient, ApiError, Config as ApiConfig, NodeConfigEnum, NodeType, RegisterRequest,
 };
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 fn get_hostname() -> String {
 	hostname::get()
@@ -45,6 +46,10 @@ pub struct PanelConfig {
 	pub heartbeat_interval: u64,
 }
 
+/// User data stored in Panel
+/// Maps UUID -> user_id (i64)
+type UserMap = HashMap<Uuid, i64>;
+
 /// Panel service implementation using server-r-client
 pub struct Panel {
 	client: ApiClient,
@@ -52,6 +57,8 @@ pub struct Panel {
 	running: RwLock<bool>,
 	/// Registration ID obtained from API during init
 	register_id: RwLock<Option<String>>,
+	/// User data: UUID -> user_id mapping
+	users: RwLock<UserMap>,
 }
 
 impl Panel {
@@ -68,6 +75,7 @@ impl Panel {
 			config,
 			running: RwLock::new(false),
 			register_id: RwLock::new(None),
+			users: RwLock::new(HashMap::new()),
 		})
 	}
 
@@ -79,6 +87,51 @@ impl Panel {
 	/// Get the node ID
 	pub fn node_id(&self) -> u32 {
 		self.config.node_id
+	}
+
+	/// Validate a user by UUID, returns the user_id if valid
+	pub async fn validate_user(&self, uuid: &Uuid) -> Option<i64> {
+		self.users.read().await.get(uuid).copied()
+	}
+
+	/// Get all user IDs (for traffic stats initialization)
+	pub async fn get_all_user_ids(&self) -> Vec<i64> {
+		self.users.read().await.values().copied().collect()
+	}
+
+	/// Fetch users from API and update local storage
+	async fn fetch_users(&self) -> eyre::Result<usize> {
+		let register_id = self.register_id.read().await.clone();
+		let register_id = register_id.ok_or_else(|| eyre::eyre!("No register_id available"))?;
+
+		match self
+			.client
+			.users(NodeType::Tuic, &register_id)
+			.await
+		{
+			Ok(users) => {
+				let mut user_map = self.users.write().await;
+				user_map.clear();
+				for user in &users {
+					if let Ok(uuid) = Uuid::parse_str(&user.uuid) {
+						user_map.insert(uuid, user.id);
+					} else {
+						warn!("Invalid UUID format for user {}: {}", user.id, user.uuid);
+					}
+				}
+				let count = user_map.len();
+				info!("Fetched {} users from API", count);
+				Ok(count)
+			}
+			Err(ApiError::NotModified { .. }) => {
+				info!("Users not modified (ETag match)");
+				Ok(self.users.read().await.len())
+			}
+			Err(e) => {
+				error!("Failed to fetch users: {}", e);
+				Err(eyre::eyre!("Failed to fetch users: {}", e))
+			}
+		}
 	}
 }
 
@@ -147,7 +200,9 @@ impl PanelService for Panel {
 			*self.register_id.write().await = Some(register_id);
 		}
 
-		// TODO: Implement user data fetching
+		// Fetch initial user data
+		self.fetch_users().await?;
+
 		info!("Panel service initialized");
 		Ok(())
 	}
@@ -219,6 +274,26 @@ impl OptionalPanel {
 	/// Get a reference to the inner panel if enabled
 	pub fn panel(&self) -> Option<&Arc<Panel>> {
 		self.inner.as_ref()
+	}
+
+	/// Validate a user by UUID, returns the user_id if valid
+	/// Returns None if panel is disabled or user is not found
+	pub async fn validate_user(&self, uuid: &Uuid) -> Option<i64> {
+		if let Some(panel) = &self.inner {
+			panel.validate_user(uuid).await
+		} else {
+			None
+		}
+	}
+
+	/// Get all user IDs (for traffic stats initialization)
+	/// Returns empty vec if panel is disabled
+	pub async fn get_all_user_ids(&self) -> Vec<i64> {
+		if let Some(panel) = &self.inner {
+			panel.get_all_user_ids().await
+		} else {
+			Vec::new()
+		}
 	}
 }
 
