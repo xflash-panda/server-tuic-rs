@@ -1,8 +1,16 @@
 use std::{sync::Arc, time::Duration};
 
-use server_r_client::{ApiClient, Config as ApiConfig};
+use server_r_client::{
+	ApiClient, Config as ApiConfig, NodeConfigEnum, NodeType, RegisterRequest,
+};
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
+
+fn get_hostname() -> String {
+	hostname::get()
+		.map(|h| h.to_string_lossy().to_string())
+		.unwrap_or_else(|_| "unknown".to_string())
+}
 
 /// Trait defining the lifecycle of a panel service
 #[async_trait::async_trait]
@@ -42,6 +50,8 @@ pub struct Panel {
 	client: ApiClient,
 	config: PanelConfig,
 	running: RwLock<bool>,
+	/// Registration ID obtained from API during init
+	register_id: RwLock<Option<String>>,
 }
 
 impl Panel {
@@ -57,6 +67,7 @@ impl Panel {
 			client,
 			config,
 			running: RwLock::new(false),
+			register_id: RwLock::new(None),
 		})
 	}
 
@@ -75,15 +86,75 @@ impl Panel {
 impl PanelService for Panel {
 	async fn init(&self) -> eyre::Result<()> {
 		info!("Panel service initializing...");
-		// TODO: Implement user data fetching, node registration, etc.
+
+		// Fetch config from API - this is critical, exit if it fails
+		let node_config = self
+			.client
+			.config(NodeType::Tuic, self.config.node_id as i64)
+			.await
+			.map_err(|e| {
+				error!("Failed to fetch config from API: {}", e);
+				eyre::eyre!(
+					"Failed to fetch config from API, cannot continue: {}",
+					e
+				)
+			})?;
+
+		info!("Successfully fetched node config: {:?}", node_config);
+
+		// Convert to TuicConfig
+		let tuic_config = match node_config {
+			NodeConfigEnum::Tuic(config) => config,
+			_ => {
+				error!("Expected Tuic config but got different type");
+				return Err(eyre::eyre!(
+					"Expected Tuic config but got different type, cannot continue"
+				));
+			}
+		};
+
+		info!(
+			"Tuic config - server_port: {}, id: {}",
+			tuic_config.server_port, tuic_config.id
+		);
+
+		// Get hostname and register node
+		let hostname = get_hostname();
+		let register_request = RegisterRequest::new(hostname.clone(), tuic_config.server_port);
+
+		info!(
+			"Registering node with hostname: {}, port: {}",
+			hostname, tuic_config.server_port
+		);
+
+		let register_id = self
+			.client
+			.register(
+				NodeType::Tuic,
+				self.config.node_id as i64,
+				register_request,
+			)
+			.await
+			.map_err(|e| {
+				error!("Failed to register node: {}", e);
+				eyre::eyre!("Failed to register node, cannot continue: {}", e)
+			})?;
+
+		info!("Node registered successfully, register_id: {}", register_id);
+
+		// Save register_id for later use
+		{
+			*self.register_id.write().await = Some(register_id);
+		}
+
+		// TODO: Implement user data fetching
 		info!("Panel service initialized");
 		Ok(())
 	}
 
 	async fn run(&self) -> eyre::Result<()> {
 		{
-			let mut running = self.running.write().await;
-			*running = true;
+			*self.running.write().await = true;
 		}
 
 		info!("Panel service running...");
@@ -109,10 +180,8 @@ impl PanelService for Panel {
 
 	async fn close(&self) -> eyre::Result<()> {
 		info!("Panel service closing...");
-
 		{
-			let mut running = self.running.write().await;
-			*running = false;
+			*self.running.write().await = false;
 		}
 
 		// TODO: Implement cleanup:

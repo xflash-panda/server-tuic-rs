@@ -35,6 +35,7 @@ register-count = { version = "0.1.0", default-features = false, features = ["std
 
 # Panel API Client
 server-r-client = { git = "https://github.com/xflash-panda/server-r-client.git", branch = "dev" }
+hostname = "0.4"
 
 # Tokio/Async
 tokio = { version = "1", default-features = false, features = ["io-util", "macros", "net", "parking_lot", "rt-multi-thread", "time", "fs", "signal"] }
