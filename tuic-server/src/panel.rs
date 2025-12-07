@@ -142,6 +142,15 @@ impl PanelService for Panel {
 	async fn init(&self) -> eyre::Result<()> {
 		info!("Panel service initializing...");
 
+		// Ensure data directory exists
+		if !self.config.data_dir.exists() {
+			info!("Creating data directory: {:?}", self.config.data_dir);
+			std::fs::create_dir_all(&self.config.data_dir).map_err(|e| {
+				error!("Failed to create data directory: {}", e);
+				eyre::eyre!("Failed to create data directory {:?}: {}", self.config.data_dir, e)
+			})?;
+		}
+
 		// Fetch config from API - this is critical, exit if it fails
 		let node_config = self
 			.client
