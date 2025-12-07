@@ -7,7 +7,7 @@ use std::{
 };
 
 use tokio::sync::broadcast;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 pub mod acl;
 pub mod compat;
@@ -50,6 +50,20 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 	// Initialize panel service before server starts
 	panel_service.init().await?;
 
+	// Use inner function to ensure panel_service.close() is always called
+	let result = run_inner(panel_service.clone(), cfg).await;
+
+	// Close panel service gracefully - always called regardless of success or failure
+	info!("Closing panel service...");
+	if let Err(e) = panel_service.close().await {
+		error!("Failed to close panel service: {}", e);
+	}
+
+	result
+}
+
+/// Inner run function that can return early on error
+async fn run_inner(panel_service: Arc<OptionalPanel>, cfg: Config) -> eyre::Result<()> {
 	let mut traffic_stats = HashMap::new();
 	for (_, uid) in cfg.users.iter() {
 		traffic_stats.insert(*uid, (AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0)));
@@ -68,7 +82,7 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 	let panel_for_run = panel_service.clone();
 	let panel_handle = tokio::spawn(async move {
 		if let Err(e) = panel_for_run.run().await {
-			tracing::error!("Panel service error: {}", e);
+			error!("Panel service error: {}", e);
 		}
 	});
 
@@ -86,10 +100,6 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 			let _ = shutdown_tx.send(());
 		}
 	}
-
-	// Close panel service gracefully
-	info!("Closing panel service...");
-	panel_service.close().await?;
 
 	// Wait for panel task to finish
 	let _ = panel_handle.await;
