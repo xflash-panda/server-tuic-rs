@@ -4,7 +4,7 @@ use server_r_client::{
 	ApiClient, ApiError, Config as ApiConfig, NodeConfigEnum, NodeType, RegisterRequest,
 };
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
+use tokio::sync::{Notify, RwLock};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -68,6 +68,8 @@ pub struct Panel {
 	client: ApiClient,
 	config: PanelConfig,
 	running: RwLock<bool>,
+	/// Notify to signal shutdown to background tasks
+	shutdown: Notify,
 	/// Registration ID obtained from API during init
 	register_id: RwLock<Option<String>>,
 	/// User data: UUID -> user_id mapping
@@ -87,6 +89,7 @@ impl Panel {
 			client,
 			config,
 			running: RwLock::new(false),
+			shutdown: Notify::new(),
 			register_id: RwLock::new(None),
 			users: RwLock::new(HashMap::new()),
 		})
@@ -168,6 +171,7 @@ impl Panel {
 	}
 
 	/// Fetch users from API and update local storage
+	/// Returns the total number of users after update
 	async fn fetch_users(&self) -> eyre::Result<usize> {
 		let register_id = self.register_id.read().await.clone();
 		let register_id = register_id.ok_or_else(|| eyre::eyre!("No register_id available"))?;
@@ -178,17 +182,54 @@ impl Panel {
 			.await
 		{
 			Ok(users) => {
-				let mut user_map = self.users.write().await;
-				user_map.clear();
+				// Build new user map from API response
+				let mut new_user_map: UserMap = HashMap::new();
 				for user in &users {
 					if let Ok(uuid) = Uuid::parse_str(&user.uuid) {
-						user_map.insert(uuid, user.id);
+						new_user_map.insert(uuid, user.id);
 					} else {
 						warn!("Invalid UUID format for user {}: {}", user.id, user.uuid);
 					}
 				}
+
+				// Compare with existing users and update
+				let mut user_map = self.users.write().await;
+
+				// Find users to remove (exist in current but not in new)
+				let removed: Vec<Uuid> = user_map
+					.keys()
+					.filter(|uuid| !new_user_map.contains_key(*uuid))
+					.copied()
+					.collect();
+
+				// Find users to add (exist in new but not in current)
+				let added: Vec<Uuid> = new_user_map
+					.keys()
+					.filter(|uuid| !user_map.contains_key(*uuid))
+					.copied()
+					.collect();
+
+				// Apply changes
+				for uuid in &removed {
+					user_map.remove(uuid);
+				}
+				for uuid in &added {
+					if let Some(user_id) = new_user_map.get(uuid) {
+						user_map.insert(*uuid, *user_id);
+					}
+				}
+
 				let count = user_map.len();
-				info!("Fetched {} users from API", count);
+				if !removed.is_empty() || !added.is_empty() {
+					info!(
+						"Users updated: {} added, {} removed, {} total",
+						added.len(),
+						removed.len(),
+						count
+					);
+				} else {
+					info!("Fetched {} users from API (no changes)", count);
+				}
 				Ok(count)
 			}
 			Err(ApiError::NotModified { .. }) => {
@@ -322,19 +363,26 @@ impl PanelService for Panel {
 
 		info!("Panel service running...");
 
-		// TODO: Implement periodic tasks:
-		// - Fetch user data updates
-		// - Submit traffic statistics
-		// - Send heartbeat
+		let fetch_interval = Duration::from_secs(self.config.fetch_users_interval);
+		info!(
+			"Starting periodic user fetch task (interval: {}s)",
+			self.config.fetch_users_interval
+		);
 
-		// For now, just wait until close is called
+		// Periodic user fetch loop
 		loop {
-			let running = self.running.read().await;
-			if !*running {
-				break;
+			tokio::select! {
+				_ = self.shutdown.notified() => {
+					info!("Received shutdown signal, stopping periodic tasks");
+					break;
+				}
+				_ = tokio::time::sleep(fetch_interval) => {
+					// Fetch users periodically
+					if let Err(e) = self.fetch_users().await {
+						error!("Periodic user fetch failed: {}", e);
+					}
+				}
 			}
-			drop(running);
-			tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 		}
 
 		info!("Panel service stopped");
@@ -343,6 +391,10 @@ impl PanelService for Panel {
 
 	async fn close(&self) -> eyre::Result<()> {
 		info!("Panel service closing...");
+
+		// Signal shutdown to stop periodic tasks
+		self.shutdown.notify_waiters();
+
 		{
 			*self.running.write().await = false;
 		}
