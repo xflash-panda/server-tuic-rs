@@ -264,13 +264,14 @@ impl Panel {
 		}
 	}
 
-	/// Submit traffic statistics to API server and reset counters
+	/// Submit traffic statistics to API server
+	/// Only resets counters on successful submission to avoid data loss
 	async fn submit_traffic(&self, ctx: &AppContext) -> eyre::Result<()> {
 		let register_id = self.register_id.read().await.clone();
 		let register_id = register_id.ok_or_else(|| eyre::eyre!("No register_id available"))?;
 
-		// Collect and reset traffic stats atomically
-		let traffic_data = crate::stats::reset_all_traffic(ctx).await;
+		// Get traffic stats without resetting
+		let traffic_data = crate::stats::get_all_traffic(ctx).await;
 
 		// Filter out entries with no traffic
 		let traffic_list: Vec<UserTraffic> = traffic_data
@@ -291,11 +292,14 @@ impl Panel {
 			.await
 		{
 			Ok(()) => {
+				// Only reset counters after successful submission
+				crate::stats::reset_all_traffic(ctx).await;
 				info!("Traffic submitted successfully ({} users)", count);
 				Ok(())
 			}
 			Err(e) => {
-				error!("Failed to submit traffic: {}", e);
+				// Keep the data for next submission attempt
+				error!("Failed to submit traffic: {}, data retained for next attempt", e);
 				Err(eyre::eyre!("Failed to submit traffic: {}", e))
 			}
 		}
