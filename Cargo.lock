@@ -2549,7 +2549,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuic-core"
-version = "1.6.5"
+version = "0.0.1"
 dependencies = [
  "bytes",
  "eyre",
@@ -2571,7 +2571,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-server"
-version = "1.6.5"
+version = "0.0.1"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -2615,7 +2615,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-tests"
-version = "1.6.5"
+version = "0.0.1"
 dependencies = [
  "aws-lc-rs",
  "eyre",
