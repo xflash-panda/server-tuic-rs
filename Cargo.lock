@@ -2597,6 +2597,7 @@ dependencies = [
  "rustls",
  "rustls-pemfile",
  "serde",
+ "serde_json",
  "server-r-client",
  "socket2 0.6.1",
  "tempfile",

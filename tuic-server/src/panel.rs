@@ -3,9 +3,20 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 use server_r_client::{
 	ApiClient, ApiError, Config as ApiConfig, NodeConfigEnum, NodeType, RegisterRequest,
 };
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 use uuid::Uuid;
+
+/// State file name
+const STATE_FILE: &str = "state.json";
+
+/// Persistent state for the panel
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct PanelState {
+	/// Registration ID obtained from API
+	register_id: Option<String>,
+}
 
 fn get_hostname() -> String {
 	hostname::get()
@@ -99,6 +110,49 @@ impl Panel {
 	/// Get all user IDs (for traffic stats initialization)
 	pub async fn get_all_user_ids(&self) -> Vec<i64> {
 		self.users.read().await.values().copied().collect()
+	}
+
+	/// Get the state file path
+	fn state_file_path(&self) -> PathBuf {
+		self.config.data_dir.join(STATE_FILE)
+	}
+
+	/// Load state from file
+	fn load_state(&self) -> Option<PanelState> {
+		let path = self.state_file_path();
+		if !path.exists() {
+			return None;
+		}
+
+		match std::fs::read_to_string(&path) {
+			Ok(content) => match serde_json::from_str(&content) {
+				Ok(state) => {
+					info!("Loaded state from {:?}", path);
+					Some(state)
+				}
+				Err(e) => {
+					warn!("Failed to parse state file: {}", e);
+					None
+				}
+			},
+			Err(e) => {
+				warn!("Failed to read state file: {}", e);
+				None
+			}
+		}
+	}
+
+	/// Save state to file
+	fn save_state(&self, state: &PanelState) -> eyre::Result<()> {
+		let path = self.state_file_path();
+		let content = serde_json::to_string_pretty(state)
+			.map_err(|e| eyre::eyre!("Failed to serialize state: {}", e))?;
+
+		std::fs::write(&path, content)
+			.map_err(|e| eyre::eyre!("Failed to write state file {:?}: {}", path, e))?;
+
+		info!("Saved state to {:?}", path);
+		Ok(())
 	}
 
 	/// Fetch users from API and update local storage
@@ -208,8 +262,14 @@ impl PanelService for Panel {
 
 		// Save register_id for later use
 		{
-			*self.register_id.write().await = Some(register_id);
+			*self.register_id.write().await = Some(register_id.clone());
 		}
+
+		// Persist state to file
+		let state = PanelState {
+			register_id: Some(register_id),
+		};
+		self.save_state(&state)?;
 
 		// Fetch initial user data
 		self.fetch_users().await?;
