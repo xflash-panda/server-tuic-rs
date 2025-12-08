@@ -1,5 +1,5 @@
 use std::{
-	net::{SocketAddr, UdpSocket as StdUdpSocket},
+	net::{Ipv6Addr, SocketAddr, SocketAddrV6, UdpSocket as StdUdpSocket},
 	sync::Arc,
 };
 
@@ -77,22 +77,28 @@ impl Server {
 		config.transport_config(Arc::new(tp_cfg));
 
 		let socket = {
-			let domain = match ctx.cfg.server {
-				SocketAddr::V4(_) => Domain::IPV4,
-				SocketAddr::V6(_) => Domain::IPV6,
-			};
+			// Use IPv6 socket binding to [::] (all interfaces)
+			// With dual_stack=true, this socket accepts BOTH IPv4 and IPv6 connections
+			// IPv4 clients connect via IPv4-mapped IPv6 addresses (e.g., ::ffff:192.168.1.1)
+			let bind_addr: SocketAddr = SocketAddr::V6(SocketAddrV6::new(
+				Ipv6Addr::UNSPECIFIED,
+				ctx.cfg.server_port,
+				0,
+				0,
+			));
 
 			let socket =
-				Socket::new(domain, Type::DGRAM, Some(Protocol::UDP)).context("failed to create endpoint UDP socket")?;
+				Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP)).context("failed to create endpoint UDP socket")?;
 
 			if ctx.cfg.dual_stack {
+				// set_only_v6(false) enables dual-stack: IPv6 socket also accepts IPv4
 				socket
-					.set_only_v6(!ctx.cfg.dual_stack)
+					.set_only_v6(false)
 					.map_err(|err| Error::Socket("endpoint dual-stack socket setting error", err))?;
 			}
 
 			socket
-				.bind(&SockAddr::from(ctx.cfg.server))
+				.bind(&SockAddr::from(bind_addr))
 				.context("failed to bind endpoint UDP socket")?;
 
 			StdUdpSocket::from(socket)

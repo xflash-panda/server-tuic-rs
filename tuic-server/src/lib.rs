@@ -35,7 +35,7 @@ pub struct AppContext {
 }
 
 /// Run the TUIC server with the given configuration
-pub async fn run(cfg: Config) -> eyre::Result<()> {
+pub async fn run(mut cfg: Config) -> eyre::Result<()> {
 	// Initialize panel service if configured
 	let panel_service = if let Some(panel_cfg) = &cfg.panel {
 		info!("Panel service enabled, connecting to {}", panel_cfg.api_host);
@@ -49,7 +49,8 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 	let panel_service = Arc::new(panel_service);
 
 	// Initialize panel service before server starts
-	panel_service.init().await?;
+	// This updates cfg with values from panel API (e.g., server_port)
+	panel_service.init(&mut cfg).await?;
 
 	// Use inner function to ensure panel_service.close() is always called
 	let result = run_inner(panel_service.clone(), cfg).await;

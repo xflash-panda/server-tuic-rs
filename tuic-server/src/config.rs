@@ -1,5 +1,5 @@
 use std::{
-	net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+	net::{Ipv4Addr, Ipv6Addr},
 	path::PathBuf,
 	time::Duration,
 };
@@ -91,8 +91,14 @@ pub struct Cli {
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
-	#[educe(Default(expression = "[::]:8443".parse().unwrap()))]
-	pub server: SocketAddr,
+	/// Server port (set from panel API during init)
+	#[serde(skip)]
+	pub server_port: u16,
+
+	/// Old server field (deprecated, port now fetched from panel API)
+	#[serde(default, skip_serializing, rename = "server")]
+	#[deprecated]
+	pub __server: Option<serde::de::IgnoredAny>,
 
 	/// Users config (deprecated, now fetched from panel API)
 	#[serde(default, skip_serializing, rename = "users")]
@@ -118,8 +124,14 @@ pub struct Config {
 	#[educe(Default = true)]
 	pub udp_relay_ipv6: bool,
 
-	#[educe(Default = false)]
+	/// Zero RTT handshake (set from panel API during init)
+	#[serde(skip)]
 	pub zero_rtt_handshake: bool,
+
+	/// Old zero_rtt_handshake field (deprecated, now fetched from panel API)
+	#[serde(default, skip_serializing, rename = "zero_rtt_handshake")]
+	#[deprecated]
+	pub __zero_rtt_handshake: Option<serde::de::IgnoredAny>,
 
 	#[educe(Default = true)]
 	pub dual_stack: bool,
@@ -478,9 +490,10 @@ mod tests {
 
 		let result = test_parse_config(config).await.unwrap();
 
-		assert_eq!(result.server, "127.0.0.1:8080".parse().unwrap());
+		// server and zero_rtt_handshake fields are now deprecated, fetched from panel API
 		assert!(!result.udp_relay_ipv6);
-		assert!(result.zero_rtt_handshake);
+		// zero_rtt_handshake defaults to false, set by panel API
+		assert!(!result.zero_rtt_handshake);
 
 		assert_eq!(result.quic.initial_mtu, 1400);
 		assert_eq!(result.quic.min_mtu, 1300);
@@ -671,9 +684,10 @@ mod tests {
 		let result = test_parse_config(config).await.unwrap();
 
 		// Check default values
-		assert_eq!(result.server, "[::]:8443".parse().unwrap());
+		// server_port and zero_rtt_handshake are fetched from panel API, default to 0/false
+		assert_eq!(result.server_port, 0);
 		assert!(result.udp_relay_ipv6);
-		assert!(!result.zero_rtt_handshake);
+		assert!(!result.zero_rtt_handshake); // defaults to false, set by panel API
 		assert!(result.dual_stack);
 		assert_eq!(result.auth_timeout, Duration::from_secs(3));
 		assert_eq!(result.task_negotiation_timeout, Duration::from_secs(3));
@@ -695,10 +709,12 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_invalid_socket_addr() {
+		// server field is now deprecated and ignored, so invalid addresses don't cause errors
+		// The server_port is fetched from panel API instead
 		let config = include_str!("../tests/config/invalid_socket_addr.toml");
 
 		let result = test_parse_config(config).await;
-		assert!(result.is_err());
+		assert!(result.is_ok());
 	}
 
 	#[tokio::test]

@@ -31,7 +31,8 @@ fn get_hostname() -> String {
 #[async_trait::async_trait]
 pub trait PanelService: Send + Sync {
 	/// Initialize the service (called before server starts)
-	async fn init(&self) -> eyre::Result<()>;
+	/// Updates the config with values fetched from panel API (e.g., server_port)
+	async fn init(&self, cfg: &mut crate::Config) -> eyre::Result<()>;
 
 	/// Run the service (called while server is running)
 	/// This method should be spawned as a background task
@@ -308,7 +309,7 @@ impl Panel {
 
 #[async_trait::async_trait]
 impl PanelService for Panel {
-	async fn init(&self) -> eyre::Result<()> {
+	async fn init(&self, cfg: &mut crate::Config) -> eyre::Result<()> {
 		info!("Panel service initializing...");
 
 		// Ensure data directory exists
@@ -319,6 +320,43 @@ impl PanelService for Panel {
 				eyre::eyre!("Failed to create data directory {:?}: {}", self.config.data_dir, e)
 			})?;
 		}
+
+		// Always fetch config from API to get server_port
+		let node_config = self
+			.client
+			.config(NodeType::Tuic, self.config.node_id as i64)
+			.await
+			.map_err(|e| {
+				error!("Failed to fetch config from API: {}", e);
+				eyre::eyre!(
+					"Failed to fetch config from API, cannot continue: {}",
+					e
+				)
+			})?;
+
+		info!("Successfully fetched node config: {:?}", node_config);
+
+		// Convert to TuicConfig
+		let tuic_config = match node_config {
+			NodeConfigEnum::Tuic(config) => config,
+			_ => {
+				error!("Expected Tuic config but got different type");
+				return Err(eyre::eyre!(
+					"Expected Tuic config but got different type, cannot continue"
+				));
+			}
+		};
+
+		let server_port = tuic_config.server_port;
+		let zero_rtt_handshake = tuic_config.zero_rtt_handshake;
+		info!(
+			"Tuic config - server_port: {}, zero_rtt_handshake: {}, id: {}",
+			server_port, zero_rtt_handshake, tuic_config.id
+		);
+
+		// Update config with values from panel API
+		cfg.server_port = server_port;
+		cfg.zero_rtt_handshake = zero_rtt_handshake;
 
 		// Try to load existing state and verify register_id
 		let mut need_register = true;
@@ -344,44 +382,13 @@ impl PanelService for Panel {
 		}
 
 		if need_register {
-			// Fetch config from API - this is critical, exit if it fails
-			let node_config = self
-				.client
-				.config(NodeType::Tuic, self.config.node_id as i64)
-				.await
-				.map_err(|e| {
-					error!("Failed to fetch config from API: {}", e);
-					eyre::eyre!(
-						"Failed to fetch config from API, cannot continue: {}",
-						e
-					)
-				})?;
-
-			info!("Successfully fetched node config: {:?}", node_config);
-
-			// Convert to TuicConfig
-			let tuic_config = match node_config {
-				NodeConfigEnum::Tuic(config) => config,
-				_ => {
-					error!("Expected Tuic config but got different type");
-					return Err(eyre::eyre!(
-						"Expected Tuic config but got different type, cannot continue"
-					));
-				}
-			};
-
-			info!(
-				"Tuic config - server_port: {}, id: {}",
-				tuic_config.server_port, tuic_config.id
-			);
-
 			// Get hostname and register node
 			let hostname = get_hostname();
-			let register_request = RegisterRequest::new(hostname.clone(), tuic_config.server_port);
+			let register_request = RegisterRequest::new(hostname.clone(), server_port);
 
 			info!(
 				"Registering node with hostname: {}, port: {}",
-				hostname, tuic_config.server_port
+				hostname, server_port
 			);
 
 			let register_id = self
@@ -417,7 +424,7 @@ impl PanelService for Panel {
 		// Send initial heartbeat
 		self.send_heartbeat().await?;
 
-		info!("Panel service initialized");
+		info!("Panel service initialized, server_port: {}", server_port);
 		Ok(())
 	}
 
@@ -564,12 +571,12 @@ impl OptionalPanel {
 
 #[async_trait::async_trait]
 impl PanelService for OptionalPanel {
-	async fn init(&self) -> eyre::Result<()> {
+	async fn init(&self, cfg: &mut crate::Config) -> eyre::Result<()> {
 		if let Some(panel) = &self.inner {
-			panel.init().await
+			panel.init(cfg).await
 		} else {
-			warn!("Panel service is disabled, skipping init");
-			Ok(())
+			error!("Panel service is required but not configured");
+			Err(eyre::eyre!("Panel service is required to get server_port from API"))
 		}
 	}
 

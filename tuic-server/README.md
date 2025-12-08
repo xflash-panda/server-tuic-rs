@@ -83,13 +83,11 @@ Configuration files use the TOML format with `.toml` file extension.
 ### Example configuration
 
 ```toml
-# Socket address to listen on
-server = "[::]:443"
+# Server port and zero_rtt_handshake are now fetched from panel API (no longer configured here)
+# The server listens on [::] (all interfaces) with dual-stack support
 
 # Create separate UDP sockets for relaying IPv6 UDP packets
 udp_relay_ipv6 = true
-# Enable 0-RTT QUIC handshake (recommended: false for security)
-zero_rtt_handshake = false
 # Set if listening socket should be dual-stack (IPv4/IPv6)
 dual_stack = true
 # How long to wait for client authentication command
