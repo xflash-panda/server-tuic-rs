@@ -54,9 +54,9 @@ pub struct Cli {
 	#[arg(long, value_name = "PATH", default_value = "/root/.cert/server.key")]
 	pub key_file: PathBuf,
 
-	/// Log level
-	#[arg(long, value_name = "LEVEL", default_value = "info")]
-	pub log_level: LogLevel,
+	/// Log mode
+	#[arg(long, value_name = "MODE", default_value = "info")]
+	pub log_mode: LogLevel,
 
 	/// Server address (e.g., "https://api.example.com")
 	#[arg(long, value_name = "URL")]
@@ -99,9 +99,9 @@ pub struct Config {
 	#[deprecated]
 	pub __users: Option<serde::de::IgnoredAny>,
 
-	/// Log level (set from CLI, not config file)
+	/// Log mode (set from CLI, not config file)
 	#[serde(skip)]
-	pub log_level: LogLevel,
+	pub log_mode: LogLevel,
 	/// Certificate file path (set from CLI, not config file)
 	#[serde(skip)]
 	pub cert_file: PathBuf,
@@ -421,7 +421,7 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 	config.migrate();
 
 	// Set CLI arguments into config
-	config.log_level = cli.log_level;
+	config.log_mode = cli.log_mode;
 	config.cert_file = cli.cert_file;
 	config.key_file = cli.key_file;
 

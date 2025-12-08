@@ -27,9 +27,9 @@ async fn main() -> eyre::Result<()> {
 	};
 	let filter = tracing_subscriber::filter::Targets::new()
 		.with_targets(vec![
-			("tuic", cfg.log_level),
-			("tuic_quinn", cfg.log_level),
-			("tuic_server", cfg.log_level),
+			("tuic", cfg.log_mode),
+			("tuic_quinn", cfg.log_mode),
+			("tuic_server", cfg.log_mode),
 		])
 		.with_default(LevelFilter::INFO);
 	let registry = tracing_subscriber::registry();
