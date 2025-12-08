@@ -155,6 +155,18 @@ impl Panel {
 		Ok(())
 	}
 
+	/// Delete state file
+	fn delete_state(&self) {
+		let path = self.state_file_path();
+		if path.exists() {
+			if let Err(e) = std::fs::remove_file(&path) {
+				warn!("Failed to delete state file {:?}: {}", path, e);
+			} else {
+				info!("Deleted state file {:?}", path);
+			}
+		}
+	}
+
 	/// Fetch users from API and update local storage
 	async fn fetch_users(&self) -> eyre::Result<usize> {
 		let register_id = self.register_id.read().await.clone();
@@ -205,71 +217,96 @@ impl PanelService for Panel {
 			})?;
 		}
 
-		// Fetch config from API - this is critical, exit if it fails
-		let node_config = self
-			.client
-			.config(NodeType::Tuic, self.config.node_id as i64)
-			.await
-			.map_err(|e| {
-				error!("Failed to fetch config from API: {}", e);
-				eyre::eyre!(
-					"Failed to fetch config from API, cannot continue: {}",
-					e
-				)
-			})?;
-
-		info!("Successfully fetched node config: {:?}", node_config);
-
-		// Convert to TuicConfig
-		let tuic_config = match node_config {
-			NodeConfigEnum::Tuic(config) => config,
-			_ => {
-				error!("Expected Tuic config but got different type");
-				return Err(eyre::eyre!(
-					"Expected Tuic config but got different type, cannot continue"
-				));
+		// Try to load existing state and verify register_id
+		let mut need_register = true;
+		if let Some(state) = self.load_state() {
+			if let Some(saved_register_id) = state.register_id {
+				info!("Found saved register_id, verifying...");
+				match self.client.verify(NodeType::Tuic, &saved_register_id).await {
+					Ok(true) => {
+						info!("Saved register_id is valid, skipping registration");
+						*self.register_id.write().await = Some(saved_register_id);
+						need_register = false;
+					}
+					Ok(false) => {
+						warn!("Saved register_id is invalid, will re-register");
+						self.delete_state();
+					}
+					Err(e) => {
+						warn!("Failed to verify register_id: {}, will re-register", e);
+						self.delete_state();
+					}
+				}
 			}
-		};
-
-		info!(
-			"Tuic config - server_port: {}, id: {}",
-			tuic_config.server_port, tuic_config.id
-		);
-
-		// Get hostname and register node
-		let hostname = get_hostname();
-		let register_request = RegisterRequest::new(hostname.clone(), tuic_config.server_port);
-
-		info!(
-			"Registering node with hostname: {}, port: {}",
-			hostname, tuic_config.server_port
-		);
-
-		let register_id = self
-			.client
-			.register(
-				NodeType::Tuic,
-				self.config.node_id as i64,
-				register_request,
-			)
-			.await
-			.map_err(|e| {
-				error!("Failed to register node: {}", e);
-				eyre::eyre!("Failed to register node, cannot continue: {}", e)
-			})?;
-
-		info!("Node registered successfully, register_id: {}", register_id);
-
-		// Save register_id for later use
-		{
-			*self.register_id.write().await = Some(register_id.clone());
 		}
 
-		// Persist state to file
-		let state = PanelState {
-			register_id: Some(register_id),
-		};
-		self.save_state(&state)?;
+		if need_register {
+			// Fetch config from API - this is critical, exit if it fails
+			let node_config = self
+				.client
+				.config(NodeType::Tuic, self.config.node_id as i64)
+				.await
+				.map_err(|e| {
+					error!("Failed to fetch config from API: {}", e);
+					eyre::eyre!(
+						"Failed to fetch config from API, cannot continue: {}",
+						e
+					)
+				})?;
+
+			info!("Successfully fetched node config: {:?}", node_config);
+
+			// Convert to TuicConfig
+			let tuic_config = match node_config {
+				NodeConfigEnum::Tuic(config) => config,
+				_ => {
+					error!("Expected Tuic config but got different type");
+					return Err(eyre::eyre!(
+						"Expected Tuic config but got different type, cannot continue"
+					));
+				}
+			};
+
+			info!(
+				"Tuic config - server_port: {}, id: {}",
+				tuic_config.server_port, tuic_config.id
+			);
+
+			// Get hostname and register node
+			let hostname = get_hostname();
+			let register_request = RegisterRequest::new(hostname.clone(), tuic_config.server_port);
+
+			info!(
+				"Registering node with hostname: {}, port: {}",
+				hostname, tuic_config.server_port
+			);
+
+			let register_id = self
+				.client
+				.register(
+					NodeType::Tuic,
+					self.config.node_id as i64,
+					register_request,
+				)
+				.await
+				.map_err(|e| {
+					error!("Failed to register node: {}", e);
+					eyre::eyre!("Failed to register node, cannot continue: {}", e)
+				})?;
+
+			info!("Node registered successfully, register_id: {}", register_id);
+
+			// Save register_id for later use
+			{
+				*self.register_id.write().await = Some(register_id.clone());
+			}
+
+			// Persist state to file
+			let state = PanelState {
+				register_id: Some(register_id),
+			};
+			self.save_state(&state)?;
+		}
 
 		// Fetch initial user data
 		self.fetch_users().await?;
@@ -310,9 +347,23 @@ impl PanelService for Panel {
 			*self.running.write().await = false;
 		}
 
-		// TODO: Implement cleanup:
-		// - Submit final traffic statistics
-		// - Unregister node
+		// Unregister node if we have a register_id
+		let register_id = self.register_id.read().await.clone();
+		if let Some(rid) = register_id {
+			info!("Unregistering node with register_id: {}", rid);
+			match self.client.unregister(NodeType::Tuic, &rid).await {
+				Ok(()) => {
+					info!("Node unregistered successfully");
+					// Clear state file after successful unregister
+					self.delete_state();
+					// Clear register_id in memory
+					*self.register_id.write().await = None;
+				}
+				Err(e) => {
+					warn!("Failed to unregister node: {}", e);
+				}
+			}
+		}
 
 		info!("Panel service closed");
 		Ok(())
