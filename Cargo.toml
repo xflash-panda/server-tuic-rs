@@ -3,7 +3,7 @@ members = ["tuic-core", "tuic-server", "tuic-tests"]
 resolver = "2"
 
 [workspace.package]
-authors = ["EAimTY <ea.imty@gmail.com>", "Itsusinn <sun@ihsin.dev>"]
+authors = ["EAimTY <ea.imty@gmail.com>", "Itsusinn <sun@ihsin.dev>", "xflash-panda <masterorigin91@gmail.com>"]
 version = "0.0.1"
 rust-version = "1.85.0"
 edition = "2024"
