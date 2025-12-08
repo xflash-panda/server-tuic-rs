@@ -242,6 +242,23 @@ impl Panel {
 			}
 		}
 	}
+
+	/// Send heartbeat to API server
+	async fn send_heartbeat(&self) -> eyre::Result<()> {
+		let register_id = self.register_id.read().await.clone();
+		let register_id = register_id.ok_or_else(|| eyre::eyre!("No register_id available"))?;
+
+		match self.client.heartbeat(NodeType::Tuic, &register_id).await {
+			Ok(()) => {
+				info!("Heartbeat sent successfully");
+				Ok(())
+			}
+			Err(e) => {
+				error!("Failed to send heartbeat: {}", e);
+				Err(eyre::eyre!("Failed to send heartbeat: {}", e))
+			}
+		}
+	}
 }
 
 #[async_trait::async_trait]
@@ -352,6 +369,9 @@ impl PanelService for Panel {
 		// Fetch initial user data
 		self.fetch_users().await?;
 
+		// Send initial heartbeat
+		self.send_heartbeat().await?;
+
 		info!("Panel service initialized");
 		Ok(())
 	}
@@ -364,22 +384,37 @@ impl PanelService for Panel {
 		info!("Panel service running...");
 
 		let fetch_interval = Duration::from_secs(self.config.fetch_users_interval);
+		let heartbeat_interval = Duration::from_secs(self.config.heartbeat_interval);
+
 		info!(
-			"Starting periodic user fetch task (interval: {}s)",
-			self.config.fetch_users_interval
+			"Starting periodic tasks (user fetch: {}s, heartbeat: {}s)",
+			self.config.fetch_users_interval, self.config.heartbeat_interval
 		);
 
-		// Periodic user fetch loop
+		let mut fetch_timer = tokio::time::interval(fetch_interval);
+		let mut heartbeat_timer = tokio::time::interval(heartbeat_interval);
+
+		// Skip the first immediate tick
+		fetch_timer.tick().await;
+		heartbeat_timer.tick().await;
+
+		// Periodic tasks loop
 		loop {
 			tokio::select! {
 				_ = self.shutdown.notified() => {
 					info!("Received shutdown signal, stopping periodic tasks");
 					break;
 				}
-				_ = tokio::time::sleep(fetch_interval) => {
+				_ = fetch_timer.tick() => {
 					// Fetch users periodically
 					if let Err(e) = self.fetch_users().await {
 						error!("Periodic user fetch failed: {}", e);
+					}
+				}
+				_ = heartbeat_timer.tick() => {
+					// Send heartbeat periodically
+					if let Err(e) = self.send_heartbeat().await {
+						error!("Heartbeat failed: {}", e);
 					}
 				}
 			}
