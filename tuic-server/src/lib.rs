@@ -78,8 +78,9 @@ async fn run_inner(panel_service: Arc<OptionalPanel>, cfg: Config) -> eyre::Resu
 
 	// Spawn panel service run task
 	let panel_for_run = panel_service.clone();
+	let ctx_for_panel = ctx.clone();
 	let panel_handle = tokio::spawn(async move {
-		if let Err(e) = panel_for_run.run().await {
+		if let Err(e) = panel_for_run.run(ctx_for_panel).await {
 			error!("Panel service error: {}", e);
 		}
 	});

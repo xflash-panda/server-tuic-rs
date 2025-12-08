@@ -2,11 +2,14 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use server_r_client::{
 	ApiClient, ApiError, Config as ApiConfig, NodeConfigEnum, NodeType, RegisterRequest,
+	UserTraffic,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Notify, RwLock};
 use tracing::{error, info, warn};
 use uuid::Uuid;
+
+use crate::AppContext;
 
 /// State file name
 const STATE_FILE: &str = "state.json";
@@ -32,7 +35,8 @@ pub trait PanelService: Send + Sync {
 
 	/// Run the service (called while server is running)
 	/// This method should be spawned as a background task
-	async fn run(&self) -> eyre::Result<()>;
+	/// The ctx parameter provides access to traffic statistics
+	async fn run(&self, ctx: Arc<AppContext>) -> eyre::Result<()>;
 
 	/// Close the service (called when server is shutting down)
 	async fn close(&self) -> eyre::Result<()>;
@@ -259,6 +263,43 @@ impl Panel {
 			}
 		}
 	}
+
+	/// Submit traffic statistics to API server and reset counters
+	async fn submit_traffic(&self, ctx: &AppContext) -> eyre::Result<()> {
+		let register_id = self.register_id.read().await.clone();
+		let register_id = register_id.ok_or_else(|| eyre::eyre!("No register_id available"))?;
+
+		// Collect and reset traffic stats atomically
+		let traffic_data = crate::stats::reset_all_traffic(ctx).await;
+
+		// Filter out entries with no traffic
+		let traffic_list: Vec<UserTraffic> = traffic_data
+			.into_iter()
+			.filter(|(_, tx, rx, _)| *tx > 0 || *rx > 0)
+			.map(|(uid, tx, rx, conn)| UserTraffic::with_count(uid, tx as u64, rx as u64, conn as u64))
+			.collect();
+
+		if traffic_list.is_empty() {
+			info!("No traffic to submit");
+			return Ok(());
+		}
+
+		let count = traffic_list.len();
+		match self
+			.client
+			.submit(NodeType::Tuic, &register_id, traffic_list)
+			.await
+		{
+			Ok(()) => {
+				info!("Traffic submitted successfully ({} users)", count);
+				Ok(())
+			}
+			Err(e) => {
+				error!("Failed to submit traffic: {}", e);
+				Err(eyre::eyre!("Failed to submit traffic: {}", e))
+			}
+		}
+	}
 }
 
 #[async_trait::async_trait]
@@ -376,7 +417,7 @@ impl PanelService for Panel {
 		Ok(())
 	}
 
-	async fn run(&self) -> eyre::Result<()> {
+	async fn run(&self, ctx: Arc<AppContext>) -> eyre::Result<()> {
 		{
 			*self.running.write().await = true;
 		}
@@ -385,18 +426,23 @@ impl PanelService for Panel {
 
 		let fetch_interval = Duration::from_secs(self.config.fetch_users_interval);
 		let heartbeat_interval = Duration::from_secs(self.config.heartbeat_interval);
+		let report_interval = Duration::from_secs(self.config.report_traffics_interval);
 
 		info!(
-			"Starting periodic tasks (user fetch: {}s, heartbeat: {}s)",
-			self.config.fetch_users_interval, self.config.heartbeat_interval
+			"Starting periodic tasks (user fetch: {}s, heartbeat: {}s, report traffic: {}s)",
+			self.config.fetch_users_interval,
+			self.config.heartbeat_interval,
+			self.config.report_traffics_interval
 		);
 
 		let mut fetch_timer = tokio::time::interval(fetch_interval);
 		let mut heartbeat_timer = tokio::time::interval(heartbeat_interval);
+		let mut report_timer = tokio::time::interval(report_interval);
 
 		// Skip the first immediate tick
 		fetch_timer.tick().await;
 		heartbeat_timer.tick().await;
+		report_timer.tick().await;
 
 		// Periodic tasks loop
 		loop {
@@ -415,6 +461,12 @@ impl PanelService for Panel {
 					// Send heartbeat periodically
 					if let Err(e) = self.send_heartbeat().await {
 						error!("Heartbeat failed: {}", e);
+					}
+				}
+				_ = report_timer.tick() => {
+					// Submit traffic stats periodically
+					if let Err(e) = self.submit_traffic(&ctx).await {
+						error!("Traffic submission failed: {}", e);
 					}
 				}
 			}
@@ -517,9 +569,9 @@ impl PanelService for OptionalPanel {
 		}
 	}
 
-	async fn run(&self) -> eyre::Result<()> {
+	async fn run(&self, ctx: Arc<AppContext>) -> eyre::Result<()> {
 		if let Some(panel) = &self.inner {
-			panel.run().await
+			panel.run(ctx).await
 		} else {
 			// Panel is disabled, just return immediately
 			Ok(())
