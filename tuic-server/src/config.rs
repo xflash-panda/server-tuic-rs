@@ -60,15 +60,15 @@ pub struct Cli {
 
 	/// Server address (e.g., "https://api.example.com")
 	#[arg(long, value_name = "URL")]
-	pub api: Option<String>,
+	pub api: String,
 
 	/// Token of server API
 	#[arg(long, value_name = "TOKEN")]
-	pub token: Option<String>,
+	pub token: String,
 
 	/// Node ID
 	#[arg(long, value_name = "ID")]
-	pub node: Option<u32>,
+	pub node: u32,
 
 	/// API request cycle for fetching users (in seconds)
 	#[arg(long, value_name = "SECONDS", default_value = "60")]
@@ -437,21 +437,17 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 	config.cert_file = cli.cert_file;
 	config.key_file = cli.key_file;
 
-	// Set panel configuration if all required fields are provided
-	if let (Some(api_host), Some(token), Some(node_id)) =
-		(cli.api, cli.token, cli.node)
-	{
-		config.panel = Some(crate::panel::PanelConfig {
-			api_host,
-			token,
-			node_id,
-			timeout: 30,
-			fetch_users_interval: cli.fetch_users_interval,
-			report_traffics_interval: cli.report_traffics_interval,
-			heartbeat_interval: cli.heartbeat_interval,
-			data_dir: cli.data_dir,
-		});
-	}
+	// Set panel configuration (required fields)
+	config.panel = Some(crate::panel::PanelConfig {
+		api_host: cli.api,
+		token: cli.token,
+		node_id: cli.node,
+		timeout: 30,
+		fetch_users_interval: cli.fetch_users_interval,
+		report_traffics_interval: cli.report_traffics_interval,
+		heartbeat_interval: cli.heartbeat_interval,
+		data_dir: cli.data_dir,
+	});
 
 	Ok(config)
 }
@@ -476,6 +472,12 @@ mod tests {
 			"test_binary".to_owned(),
 			"--ext-conf-file".to_owned(),
 			config_path.to_string_lossy().into_owned(),
+			"--api".to_owned(),
+			"https://api.example.com".to_owned(),
+			"--token".to_owned(),
+			"test-token".to_owned(),
+			"--node".to_owned(),
+			"1".to_owned(),
 		];
 
 		// Parse CLI with test arguments
@@ -515,7 +517,13 @@ mod tests {
 		assert!(result.is_err());
 
 		// Test non-existent configuration files - should fail when trying to parse
-		let result = Cli::try_parse_from(vec!["test_binary", "--ext-conf-file", "non_existent.toml"]);
+		let result = Cli::try_parse_from(vec![
+			"test_binary",
+			"--ext-conf-file", "non_existent.toml",
+			"--api", "https://api.example.com",
+			"--token", "test-token",
+			"--node", "1",
+		]);
 		// This will succeed at parsing CLI level, but fail when actually loading the
 		// file
 		if let Ok(cli) = result {
@@ -523,12 +531,10 @@ mod tests {
 			assert!(!cli.ext_conf_file.unwrap().exists());
 		}
 
-		// Test missing configuration file parameters - should succeed with defaults
+		// Test missing required parameters - should fail
 		let result = Cli::try_parse_from(vec!["test_binary"]);
-		// This should succeed because --ext_conf_file is optional
-		assert!(result.is_ok());
-		let cli = result.unwrap();
-		assert!(cli.ext_conf_file.is_none());
+		// This should fail because --api, --token, --node are required
+		assert!(result.is_err());
 	}
 
 	#[tokio::test]
