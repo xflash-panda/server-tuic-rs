@@ -52,10 +52,28 @@ pub async fn run(mut cfg: Config) -> eyre::Result<()> {
 	// This updates cfg with values from panel API (e.g., server_port)
 	panel_service.init(&mut cfg).await?;
 
-	// Use inner function to ensure panel_service.close() is always called
-	let result = run_inner(panel_service.clone(), cfg).await;
+	// Spawn run_inner in a separate task to catch panics
+	let panel_for_inner = panel_service.clone();
+	let handle = tokio::spawn(async move { run_inner(panel_for_inner, cfg).await });
 
-	// Close panel service gracefully - always called regardless of success or failure
+	// Wait for the task to complete and handle both normal completion and panic
+	let result = match handle.await {
+		Ok(inner_result) => inner_result,
+		Err(join_error) => {
+			if join_error.is_panic() {
+				error!("Server task panicked: {:?}", join_error);
+				Err(eyre::eyre!("Server task panicked"))
+			} else if join_error.is_cancelled() {
+				error!("Server task was cancelled");
+				Err(eyre::eyre!("Server task was cancelled"))
+			} else {
+				error!("Server task failed: {:?}", join_error);
+				Err(eyre::eyre!("Server task failed: {:?}", join_error))
+			}
+		}
+	};
+
+	// Close panel service gracefully - always called regardless of success, failure, or panic
 	info!("Closing panel service...");
 	if let Err(e) = panel_service.close().await {
 		error!("Failed to close panel service: {}", e);
