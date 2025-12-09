@@ -1,86 +1,65 @@
-# TUIC
+# Server TUIC
 
-Delicately-TUICed 0-RTT proxy protocol
+基于 TUIC 协议的代理服务器，支持控制面板集成和动态用户管理。
 
-A fork of original TUIC repo https://github.com/tuic-protocol/tuic
+Fork 自 https://github.com/tuic-protocol/tuic
 
-Compared to origin, this fork's new features:
+---
 
-**Infrastructure & CI/CD:**
-- Reusable CI/CD workflows with extensive cross-compilation support via [cross-rs](https://github.com/cross-rs/cross)
-- Support for multiple platforms: Linux (GNU/musl), Windows (MSVC), macOS, FreeBSD, and more
+## 特性
 
-**TLS & Security:**
+- 控制面板 API 集成，动态用户管理
+- 实时流量统计与上报
+- ACL 访问控制规则
+- 多出站模式 (直连 / SOCKS5)
+- TLS 证书热重载
 
-- Automatic SSL/TLS certificate provisioning via ACME (Let's Encrypt)
-- Self-signed certificate support
-- Certificate auto hot-reload for zero-downtime updates
-- `skip_cert_verify` option for client connections
+---
 
-**Performance & Stability:**
-- JEMalloc allocator integration for better memory management
-- AWS-LC-RS crypto provider for improved performance
-- More active `max_concurrent_streams` strategy
-- Rust edition 2024
+## 编译
 
-**Server Features:**
-- ACL (Access Control List) support with configurable outbound rules
-- SOCKS5 outbound proxy support
-- Network interface binding support
-- Default localhost access protection
-- Private/LAN address filtering for enhanced security
+```bash
+# 默认 (aws-lc-rs)
+cargo build --release -p server
 
+# 使用 ring
+cargo build --release -p server --no-default-features --features ring
 
-## Introduction
+# 启用 JEMalloc
+cargo build --release -p server --features jemallocator
+```
 
-TUIC is a proxy protocol focusing on minimize the additional handshake latency caused by relaying as much as possible, as well as keeping the protocol itself being simple and easy to implement
+编译产物: `target/release/server`
 
-TUIC is originally designed to be used on top of the [QUIC](https://en.wikipedia.org/wiki/QUIC) protocol, but you can use it with any other protocol, e.g. TCP, in theory
+---
 
-When paired with QUIC, TUIC can achieve:
+## 运行
 
-- 0-RTT TCP proxying
-- 0-RTT UDP proxying with NAT type [Full Cone](https://www.rfc-editor.org/rfc/rfc3489#section-5) 
-- 0-RTT authentication
-- Two UDP proxying modes:
-    - `native`: Having characteristics of native UDP mechanism
-    - `quic`: Transferring UDP packets losslessly using QUIC streams
-- Fully multiplexed
-- All the advantages of QUIC, including but not limited to:
-    - Bidirectional user-space congestion control
-    - Optional 0-RTT connection handshake
-    - Connection migration
+```bash
+server --api https://api.example.com --token YOUR_TOKEN --node 1
+```
 
-Fully-detailed TUIC protocol specification can be found in [SPEC.md](https://github.com/proxy-rs/wind/blob/main/crates/wind-tuic/SPEC.md)
+### 命令行参数
 
-## Overview
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--api <URL>` | API 服务器地址 | **必需** |
+| `--token <TOKEN>` | API 认证令牌 | **必需** |
+| `--node <ID>` | 节点 ID | **必需** |
+| `--ext_conf_file <PATH>` | 外部配置文件路径 | - |
+| `--cert_file <PATH>` | TLS 证书文件路径 | `/root/.cert/server.crt` |
+| `--key_file <PATH>` | TLS 私钥文件路径 | `/root/.cert/server.key` |
+| `--log_mode <LEVEL>` | 日志级别 | `info` |
+| `--fetch_users_interval <SECS>` | 用户列表刷新间隔 | `60` |
+| `--report_traffics_interval <SECS>` | 流量上报间隔 | `80` |
+| `--heartbeat_interval <SECS>` | 心跳间隔 | `180` |
+| `--data_dir <PATH>` | 数据目录路径 | `/var/lib/tuic-node` |
+| `--init` | 生成示例配置文件 | - |
 
-There are 3 crates provided in this repository:
+详细配置请参阅 [server/README.md](server/README.md)
 
-- **[tuic](https://github.com/Itsusinn/tuic/tree/dev/tuic)** - Library. The protocol itself, protocol & model abstraction, synchronous / asynchronous marshalling
-- **[tuic-quinn](https://github.com/Itsusinn/tuic/tree/dev/tuic-quinn)** - Library. A thin layer on top of [quinn](https://github.com/quinn-rs/quinn) to provide functions of TUIC
-- **[tuic-server](https://github.com/Itsusinn/tuic/tree/dev/tuic-server)** - Binary. Minimalistic TUIC server implementation as a reference
+---
 
+## 许可证
 
-
-## Contribute TUIC
-
-[Search TODO in code base](https://github.com/search?q=repo%3AItsusinn%2Ftuic%20todo&type=code) or [Assist with Open Issues](https://github.com/Itsusinn/tuic/issues?q=label%3A%22help+wanted%22+is%3Aissue+is%3Aopen)
-
-### Contributing Guidelines
-
-Contributors should fork from the `main` branch and submit pull requests to the `main` branch. Please note that the `dev` branch may be force-pushed from time to time, so avoid basing your work on it.
-
-## Contributors
-
-Thanks to all the contributors who have helped improve TUIC!
-
-<a href="https://github.com/Itsusinn/tuic/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=Itsusinn/tuic" />
-</a>
-
-## License
-
-Code in this repository is licensed under [GNU General Public License v3.0](https://github.com/Itsusinn/tuic/blob/dev/LICENSE)
-
-However, the concept of the TUIC protocol is license-free. You can implement, modify, and redistribute the protocol without any restrictions, even for commercial use
+[GNU General Public License v3.0](LICENSE)
