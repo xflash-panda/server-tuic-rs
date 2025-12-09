@@ -1,11 +1,11 @@
 use std::process;
 
 use clap::Parser;
+use server::config::{Cli, Control, parse_config};
 #[cfg(feature = "jemallocator")]
 use tikv_jemallocator::Jemalloc;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{fmt::time::LocalTime, layer::SubscriberExt, util::SubscriberInitExt};
-use server::config::{Cli, Control, parse_config};
 
 #[cfg(feature = "jemallocator")]
 #[global_allocator]
@@ -35,14 +35,9 @@ async fn main() -> eyre::Result<()> {
 	let registry = tracing_subscriber::registry();
 	registry
 		.with(filter)
-		.with(
-			tracing_subscriber::fmt::layer()
-				.with_target(true)
-				.with_timer(LocalTime::new(
-					time::format_description::parse("[year repr:last_two]-[month]-[day] [hour]:[minute]:[second]")
-						.unwrap(),
-				)),
-		)
+		.with(tracing_subscriber::fmt::layer().with_target(true).with_timer(LocalTime::new(
+			time::format_description::parse("[year repr:last_two]-[month]-[day] [hour]:[minute]:[second]").unwrap(),
+		)))
 		.try_init()?;
 
 	server::run(cfg).await?;

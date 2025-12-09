@@ -1,10 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
-use server_r_client::{
-	ApiClient, ApiError, Config as ApiConfig, NodeConfigEnum, NodeType, RegisterRequest,
-	UserTraffic,
-};
 use serde::{Deserialize, Serialize};
+use server_r_client::{ApiClient, ApiError, Config as ApiConfig, NodeConfigEnum, NodeType, RegisterRequest, UserTraffic};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -31,7 +28,8 @@ fn get_hostname() -> String {
 #[async_trait::async_trait]
 pub trait PanelService: Send + Sync {
 	/// Initialize the service (called before server starts)
-	/// Updates the config with values fetched from panel API (e.g., server_port)
+	/// Updates the config with values fetched from panel API (e.g.,
+	/// server_port)
 	async fn init(&self, cfg: &mut crate::Config) -> eyre::Result<()>;
 
 	/// Run the service (called while server is running)
@@ -47,21 +45,21 @@ pub trait PanelService: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct PanelConfig {
 	/// API host URL (e.g., "https://api.example.com")
-	pub api_host: String,
+	pub api_host:                 String,
 	/// Authentication token
-	pub token: String,
+	pub token:                    String,
 	/// Node ID for this server
-	pub node_id: u32,
+	pub node_id:                  u32,
 	/// Request timeout in seconds
-	pub timeout: u64,
+	pub timeout:                  u64,
 	/// Interval for fetching users from API (in seconds)
-	pub fetch_users_interval: u64,
+	pub fetch_users_interval:     u64,
 	/// Interval for reporting traffic stats to API (in seconds)
 	pub report_traffics_interval: u64,
 	/// Interval for sending heartbeat to API (in seconds)
-	pub heartbeat_interval: u64,
+	pub heartbeat_interval:       u64,
 	/// Data directory for persisting state and other data
-	pub data_dir: PathBuf,
+	pub data_dir:                 PathBuf,
 }
 
 /// User data stored in Panel
@@ -70,23 +68,21 @@ type UserMap = HashMap<Uuid, i64>;
 
 /// Panel service implementation using server-r-client
 pub struct Panel {
-	client: ApiClient,
-	config: PanelConfig,
-	running: RwLock<bool>,
+	client:      ApiClient,
+	config:      PanelConfig,
+	running:     RwLock<bool>,
 	/// Registration ID obtained from API during init
 	register_id: RwLock<Option<String>>,
 	/// User data: UUID -> user_id mapping
-	users: RwLock<UserMap>,
+	users:       RwLock<UserMap>,
 }
 
 impl Panel {
 	/// Create a new Panel instance
 	pub fn new(config: PanelConfig) -> eyre::Result<Self> {
-		let api_config = ApiConfig::new(&config.api_host, &config.token)
-			.with_timeout(Duration::from_secs(config.timeout));
+		let api_config = ApiConfig::new(&config.api_host, &config.token).with_timeout(Duration::from_secs(config.timeout));
 
-		let client = ApiClient::new(api_config)
-			.map_err(|e| eyre::eyre!("Failed to create API client: {}", e))?;
+		let client = ApiClient::new(api_config).map_err(|e| eyre::eyre!("Failed to create API client: {}", e))?;
 
 		Ok(Self {
 			client,
@@ -150,11 +146,9 @@ impl Panel {
 	/// Save state to file
 	fn save_state(&self, state: &PanelState) -> eyre::Result<()> {
 		let path = self.state_file_path();
-		let content = serde_json::to_string_pretty(state)
-			.map_err(|e| eyre::eyre!("Failed to serialize state: {}", e))?;
+		let content = serde_json::to_string_pretty(state).map_err(|e| eyre::eyre!("Failed to serialize state: {}", e))?;
 
-		std::fs::write(&path, content)
-			.map_err(|e| eyre::eyre!("Failed to write state file {:?}: {}", path, e))?;
+		std::fs::write(&path, content).map_err(|e| eyre::eyre!("Failed to write state file {:?}: {}", path, e))?;
 
 		info!("Saved state to {:?}", path);
 		Ok(())
@@ -178,11 +172,7 @@ impl Panel {
 		let register_id = self.register_id.read().await.clone();
 		let register_id = register_id.ok_or_else(|| eyre::eyre!("No register_id available"))?;
 
-		match self
-			.client
-			.users(NodeType::Tuic, &register_id)
-			.await
-		{
+		match self.client.users(NodeType::Tuic, &register_id).await {
 			Ok(users) => {
 				// Build new user map from API response
 				let mut new_user_map: UserMap = HashMap::new();
@@ -284,11 +274,7 @@ impl Panel {
 		}
 
 		let count = traffic_list.len();
-		match self
-			.client
-			.submit(NodeType::Tuic, &register_id, traffic_list)
-			.await
-		{
+		match self.client.submit(NodeType::Tuic, &register_id, traffic_list).await {
 			Ok(()) => {
 				// Only reset counters after successful submission
 				crate::stats::reset_all_traffic(ctx).await;
@@ -325,10 +311,7 @@ impl PanelService for Panel {
 			.await
 			.map_err(|e| {
 				error!("Failed to fetch config from API: {}", e);
-				eyre::eyre!(
-					"Failed to fetch config from API, cannot continue: {}",
-					e
-				)
+				eyre::eyre!("Failed to fetch config from API, cannot continue: {}", e)
 			})?;
 
 		info!("Successfully fetched node config: {:?}", node_config);
@@ -338,9 +321,7 @@ impl PanelService for Panel {
 			NodeConfigEnum::Tuic(config) => config,
 			_ => {
 				error!("Expected Tuic config but got different type");
-				return Err(eyre::eyre!(
-					"Expected Tuic config but got different type, cannot continue"
-				));
+				return Err(eyre::eyre!("Expected Tuic config but got different type, cannot continue"));
 			}
 		};
 
@@ -383,18 +364,11 @@ impl PanelService for Panel {
 			let hostname = get_hostname();
 			let register_request = RegisterRequest::new(hostname.clone(), server_port);
 
-			info!(
-				"Registering node with hostname: {}, port: {}",
-				hostname, server_port
-			);
+			info!("Registering node with hostname: {}, port: {}", hostname, server_port);
 
 			let register_id = self
 				.client
-				.register(
-					NodeType::Tuic,
-					self.config.node_id as i64,
-					register_request,
-				)
+				.register(NodeType::Tuic, self.config.node_id as i64, register_request)
 				.await
 				.map_err(|e| {
 					error!("Failed to register node: {}", e);
@@ -438,9 +412,7 @@ impl PanelService for Panel {
 
 		info!(
 			"Starting periodic tasks (user fetch: {}s, heartbeat: {}s, report traffic: {}s)",
-			self.config.fetch_users_interval,
-			self.config.heartbeat_interval,
-			self.config.report_traffics_interval
+			self.config.fetch_users_interval, self.config.heartbeat_interval, self.config.report_traffics_interval
 		);
 
 		let mut fetch_timer = tokio::time::interval(fetch_interval);

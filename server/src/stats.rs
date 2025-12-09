@@ -27,7 +27,7 @@ async fn ensure_stats(ctx: &AppContext, uid: i64) {
 pub async fn traffic_tx(ctx: &AppContext, uid: i64, bytes: usize) {
 	ensure_stats(ctx, uid).await;
 	let stats = ctx.traffic_stats.read().await;
-	if let Some((tx, _, _)) = stats.get(&uid) {
+	if let Some((tx, ..)) = stats.get(&uid) {
 		tx.fetch_add(bytes, Ordering::Relaxed);
 	}
 }
@@ -54,7 +54,11 @@ pub async fn req_incr(ctx: &AppContext, uid: i64) {
 pub async fn get_traffic(ctx: &AppContext, uid: i64) -> Option<(usize, usize, usize)> {
 	let stats = ctx.traffic_stats.read().await;
 	stats.get(&uid).map(|(tx, rx, conn)| {
-		(tx.load(Ordering::Relaxed), rx.load(Ordering::Relaxed), conn.load(Ordering::Relaxed))
+		(
+			tx.load(Ordering::Relaxed),
+			rx.load(Ordering::Relaxed),
+			conn.load(Ordering::Relaxed),
+		)
 	})
 }
 
@@ -74,11 +78,16 @@ pub async fn get_all_traffic(ctx: &AppContext) -> Vec<(i64, usize, usize, usize)
 		.collect()
 }
 
-/// Reset traffic stats for a user by UID and return previous values (tx, rx, conn)
+/// Reset traffic stats for a user by UID and return previous values (tx, rx,
+/// conn)
 pub async fn reset_traffic(ctx: &AppContext, uid: i64) -> Option<(usize, usize, usize)> {
 	let stats = ctx.traffic_stats.read().await;
 	stats.get(&uid).map(|(tx, rx, conn)| {
-		(tx.swap(0, Ordering::Relaxed), rx.swap(0, Ordering::Relaxed), conn.swap(0, Ordering::Relaxed))
+		(
+			tx.swap(0, Ordering::Relaxed),
+			rx.swap(0, Ordering::Relaxed),
+			conn.swap(0, Ordering::Relaxed),
+		)
 	})
 }
 

@@ -236,4 +236,3 @@ fn test_header_serialization_lengths() {
 	let header = Header::Heartbeat(hb);
 	assert_eq!(header.len(), 2); // version + type only
 }
-

@@ -79,13 +79,9 @@ impl Server {
 		let socket = {
 			// Use IPv6 socket binding to [::] (all interfaces)
 			// With dual_stack=true, this socket accepts BOTH IPv4 and IPv6 connections
-			// IPv4 clients connect via IPv4-mapped IPv6 addresses (e.g., ::ffff:192.168.1.1)
-			let bind_addr: SocketAddr = SocketAddr::V6(SocketAddrV6::new(
-				Ipv6Addr::UNSPECIFIED,
-				ctx.cfg.server_port,
-				0,
-				0,
-			));
+			// IPv4 clients connect via IPv4-mapped IPv6 addresses (e.g.,
+			// ::ffff:192.168.1.1)
+			let bind_addr: SocketAddr = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, ctx.cfg.server_port, 0, 0));
 
 			let socket =
 				Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP)).context("failed to create endpoint UDP socket")?;

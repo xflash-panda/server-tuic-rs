@@ -107,13 +107,13 @@ pub struct Config {
 
 	/// Log mode (set from CLI, not config file)
 	#[serde(skip)]
-	pub log_mode: LogLevel,
+	pub log_mode:  LogLevel,
 	/// Certificate file path (set from CLI, not config file)
 	#[serde(skip)]
 	pub cert_file: PathBuf,
 	/// Private key file path (set from CLI, not config file)
 	#[serde(skip)]
-	pub key_file: PathBuf,
+	pub key_file:  PathBuf,
 
 	/// Panel configuration (set from CLI, not config file)
 	#[serde(skip)]
@@ -208,7 +208,7 @@ pub struct Config {
 	pub __gso:                Option<bool>,
 	#[serde(default, rename = "pmtu")]
 	#[deprecated]
-	pub __pmtu: Option<bool>,
+	pub __pmtu:               Option<bool>,
 }
 
 
@@ -358,7 +358,6 @@ impl Config {
 				self.quic.pmtu = pmtu;
 			}
 		}
-
 	}
 
 	pub fn full_example() -> Self {
@@ -439,14 +438,14 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 
 	// Set panel configuration (required fields)
 	config.panel = Some(crate::panel::PanelConfig {
-		api_host: cli.api,
-		token: cli.token,
-		node_id: cli.node,
-		timeout: 30,
-		fetch_users_interval: cli.fetch_users_interval,
+		api_host:                 cli.api,
+		token:                    cli.token,
+		node_id:                  cli.node,
+		timeout:                  30,
+		fetch_users_interval:     cli.fetch_users_interval,
 		report_traffics_interval: cli.report_traffics_interval,
-		heartbeat_interval: cli.heartbeat_interval,
-		data_dir: cli.data_dir,
+		heartbeat_interval:       cli.heartbeat_interval,
+		data_dir:                 cli.data_dir,
 	});
 
 	Ok(config)
@@ -492,7 +491,8 @@ mod tests {
 
 		let result = test_parse_config(config).await.unwrap();
 
-		// server and zero_rtt_handshake fields are now deprecated, fetched from panel API
+		// server and zero_rtt_handshake fields are now deprecated, fetched from panel
+		// API
 		assert!(!result.udp_relay_ipv6);
 		// zero_rtt_handshake defaults to false, set by panel API
 		assert!(!result.zero_rtt_handshake);
@@ -519,10 +519,14 @@ mod tests {
 		// Test non-existent configuration files - should fail when trying to parse
 		let result = Cli::try_parse_from(vec![
 			"test_binary",
-			"--ext-conf-file", "non_existent.toml",
-			"--api", "https://api.example.com",
-			"--token", "test-token",
-			"--node", "1",
+			"--ext-conf-file",
+			"non_existent.toml",
+			"--api",
+			"https://api.example.com",
+			"--token",
+			"test-token",
+			"--node",
+			"1",
 		]);
 		// This will succeed at parsing CLI level, but fail when actually loading the
 		// file
@@ -690,7 +694,8 @@ mod tests {
 		let result = test_parse_config(config).await.unwrap();
 
 		// Check default values
-		// server_port and zero_rtt_handshake are fetched from panel API, default to 0/false
+		// server_port and zero_rtt_handshake are fetched from panel API, default to
+		// 0/false
 		assert_eq!(result.server_port, 0);
 		assert!(result.udp_relay_ipv6);
 		assert!(!result.zero_rtt_handshake); // defaults to false, set by panel API
@@ -705,7 +710,8 @@ mod tests {
 	#[tokio::test]
 	async fn test_invalid_uuid() {
 		// Users are now fetched from panel API, not config file
-		// The users field is deprecated and ignored, so invalid UUIDs don't cause errors
+		// The users field is deprecated and ignored, so invalid UUIDs don't cause
+		// errors
 		let config = include_str!("../tests/config/invalid_uuid.toml");
 
 		let result = test_parse_config(config).await;
@@ -715,8 +721,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_invalid_socket_addr() {
-		// server field is now deprecated and ignored, so invalid addresses don't cause errors
-		// The server_port is fetched from panel API instead
+		// server field is now deprecated and ignored, so invalid addresses don't cause
+		// errors The server_port is fetched from panel API instead
 		let config = include_str!("../tests/config/invalid_socket_addr.toml");
 
 		let result = test_parse_config(config).await;
@@ -767,5 +773,4 @@ mod tests {
 		let result = test_parse_config(config_new_reno).await.unwrap();
 		assert_eq!(result.quic.congestion_control.controller, CongestionController::NewReno);
 	}
-
 }

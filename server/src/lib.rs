@@ -73,7 +73,8 @@ pub async fn run(mut cfg: Config) -> eyre::Result<()> {
 		}
 	};
 
-	// Close panel service gracefully - always called regardless of success, failure, or panic
+	// Close panel service gracefully - always called regardless of success,
+	// failure, or panic
 	info!("Closing panel service...");
 	if let Err(e) = panel_service.close().await {
 		error!("Failed to close panel service: {}", e);
@@ -147,9 +148,7 @@ async fn wait_for_shutdown_signal() {
 
 	#[cfg(not(unix))]
 	{
-		tokio::signal::ctrl_c()
-			.await
-			.expect("Failed to listen for Ctrl-C");
+		tokio::signal::ctrl_c().await.expect("Failed to listen for Ctrl-C");
 		info!("Received Ctrl-C");
 	}
 }
