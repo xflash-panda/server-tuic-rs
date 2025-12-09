@@ -1,8 +1,9 @@
 version: 2
 updates:
-  # Rust dependencies
+  # Rust dependencies for dev/master
   - package-ecosystem: "cargo"
     directory: "/"
+    target-branch: "dev/master"
     schedule:
       interval: "weekly"
     groups:
@@ -12,9 +13,32 @@ updates:
     commit-message:
       prefix: "chore(deps)"
 
-  # GitHub Actions
+  # GitHub Actions for dev/master
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "dev/master"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(ci)"
+
+  # Rust dependencies for dev/agent-master
+  - package-ecosystem: "cargo"
+    directory: "/"
+    target-branch: "dev/agent-master"
+    schedule:
+      interval: "weekly"
+    groups:
+      rust-dependencies:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "chore(deps)"
+
+  # GitHub Actions for dev/agent-master
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "dev/agent-master"
     schedule:
       interval: "weekly"
     commit-message:
