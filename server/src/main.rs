@@ -5,7 +5,7 @@ use clap::Parser;
 use tikv_jemallocator::Jemalloc;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{fmt::time::LocalTime, layer::SubscriberExt, util::SubscriberInitExt};
-use tuic_server::config::{Cli, Control, parse_config};
+use server::config::{Cli, Control, parse_config};
 
 #[cfg(feature = "jemallocator")]
 #[global_allocator]
@@ -29,7 +29,7 @@ async fn main() -> eyre::Result<()> {
 		.with_targets(vec![
 			("tuic", cfg.log_mode),
 			("tuic_quinn", cfg.log_mode),
-			("tuic_server", cfg.log_mode),
+			("server", cfg.log_mode),
 		])
 		.with_default(LevelFilter::INFO);
 	let registry = tracing_subscriber::registry();
@@ -45,7 +45,7 @@ async fn main() -> eyre::Result<()> {
 		)
 		.try_init()?;
 
-	tuic_server::run(cfg).await?;
+	server::run(cfg).await?;
 
 	Ok(())
 }

@@ -1,4 +1,4 @@
-// Library interface for tuic-server
+// Library interface for server
 // This allows the server to be used as a library in integration tests
 
 use std::{

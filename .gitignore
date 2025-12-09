@@ -5,7 +5,7 @@ target/
 .claude/
 CLAUDE.md
 
-tuic-server/dbg.toml
+server/dbg.toml
 
 client.json
 client.json5

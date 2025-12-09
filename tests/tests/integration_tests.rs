@@ -3,7 +3,7 @@
 
 use std::io::Cursor;
 
-use tuic_core::{Address, Authenticate, Connect, Dissociate, Header, Heartbeat, Packet};
+use tuic::{Address, Authenticate, Connect, Dissociate, Header, Heartbeat, Packet};
 use uuid::Uuid;
 
 // Helper function to marshal and unmarshal a header

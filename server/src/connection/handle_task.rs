@@ -11,7 +11,7 @@ use tokio::{
 	net::{self, TcpSocket, TcpStream},
 };
 use tracing::{info, warn};
-use tuic_core::{
+use tuic::{
 	Address, is_private_ip,
 	quinn::{Authenticate, Connect, Packet},
 };

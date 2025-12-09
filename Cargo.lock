@@ -1951,6 +1951,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "server"
+version = "0.0.1"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "aws-lc-rs",
+ "bytes",
+ "clap",
+ "derive_more",
+ "educe",
+ "eyre",
+ "figment",
+ "hostname",
+ "humantime",
+ "humantime-serde",
+ "ip_network",
+ "ipnet",
+ "moka",
+ "pest",
+ "pest_derive",
+ "quinn",
+ "rcgen",
+ "regex",
+ "register-count",
+ "rustls",
+ "rustls-pemfile",
+ "serde",
+ "serde_json",
+ "server-r-client",
+ "socket2 0.6.1",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tikv-jemallocator",
+ "time",
+ "tokio",
+ "tokio-test",
+ "toml 0.9.8",
+ "tracing",
+ "tracing-subscriber",
+ "tuic",
+ "uuid",
+]
+
+[[package]]
 name = "server-r-client"
 version = "0.1.0"
 source = "git+https://github.com/xflash-panda/server-r-client.git?branch=dev#283bd70cf023f3bde4e036bf3965eabebacfc259"
@@ -2118,6 +2162,26 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "tests"
+version = "0.0.1"
+dependencies = [
+ "aws-lc-rs",
+ "eyre",
+ "fast-socks5",
+ "json5",
+ "lexopt",
+ "rustls",
+ "serial_test",
+ "server",
+ "server-r-client",
+ "tokio",
+ "tracing",
+ "tracing-test",
+ "tuic",
+ "uuid",
 ]
 
 [[package]]
@@ -2548,7 +2612,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
-name = "tuic-core"
+name = "tuic"
 version = "0.0.1"
 dependencies = [
  "bytes",
@@ -2565,71 +2629,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tracing",
- "tuic-core",
- "uuid",
-]
-
-[[package]]
-name = "tuic-server"
-version = "0.0.1"
-dependencies = [
- "arc-swap",
- "async-trait",
- "aws-lc-rs",
- "bytes",
- "clap",
- "derive_more",
- "educe",
- "eyre",
- "figment",
- "hostname",
- "humantime",
- "humantime-serde",
- "ip_network",
- "ipnet",
- "moka",
- "pest",
- "pest_derive",
- "quinn",
- "rcgen",
- "regex",
- "register-count",
- "rustls",
- "rustls-pemfile",
- "serde",
- "serde_json",
- "server-r-client",
- "socket2 0.6.1",
- "tempfile",
- "thiserror 2.0.17",
- "tikv-jemallocator",
- "time",
- "tokio",
- "tokio-test",
- "toml 0.9.8",
- "tracing",
- "tracing-subscriber",
- "tuic-core",
- "uuid",
-]
-
-[[package]]
-name = "tuic-tests"
-version = "0.0.1"
-dependencies = [
- "aws-lc-rs",
- "eyre",
- "fast-socks5",
- "json5",
- "lexopt",
- "rustls",
- "serial_test",
- "server-r-client",
- "tokio",
- "tracing",
- "tracing-test",
- "tuic-core",
- "tuic-server",
+ "tuic",
  "uuid",
 ]
 

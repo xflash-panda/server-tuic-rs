@@ -57,7 +57,7 @@
 //! ## Usage Example
 //!
 //! ```rust
-//! use tuic_server::rule::{Rule, MatchContext, NetworkType};
+//! use server::rule::{Rule, MatchContext, NetworkType};
 //! use std::net::IpAddr;
 //!
 //! // Parse a single rule

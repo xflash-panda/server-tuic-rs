@@ -1,8 +1,8 @@
-// Re-export common types from tuic-core
-pub use tuic_core::{StackPrefer, UdpRelayMode};
+// Re-export common types from tuic
+pub use tuic::{StackPrefer, UdpRelayMode};
 
 // Type alias for backward compatibility
-pub type CongestionController = tuic_core::CongestionControl;
+pub type CongestionController = tuic::CongestionControl;
 
 pub trait FutResultExt<T, E, Fut> {
 	fn log_err(self) -> impl std::future::Future<Output = Option<T>>;

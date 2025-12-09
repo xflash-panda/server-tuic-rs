@@ -35,7 +35,7 @@ impl std::error::Error for Control {}
 
 /// TUIC Server - A minimalistic TUIC server implementation
 #[derive(Parser, Debug)]
-#[command(name = "tuic-server")]
+#[command(name = "server")]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
 	/// Path to the external config file (optional)

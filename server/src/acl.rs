@@ -4,7 +4,7 @@ use derive_more::Display;
 use pest::Parser;
 use pest_derive::Parser;
 use serde::{Deserialize, Deserializer, Serialize, de};
-use tuic_core::is_private_ip;
+use tuic::is_private_ip;
 
 #[derive(Parser)]
 #[grammar = "acl.pest"]
