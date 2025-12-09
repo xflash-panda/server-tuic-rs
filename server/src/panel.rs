@@ -5,7 +5,7 @@ use server_r_client::{
 	UserTraffic,
 };
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -73,8 +73,6 @@ pub struct Panel {
 	client: ApiClient,
 	config: PanelConfig,
 	running: RwLock<bool>,
-	/// Notify to signal shutdown to background tasks
-	shutdown: Notify,
 	/// Registration ID obtained from API during init
 	register_id: RwLock<Option<String>>,
 	/// User data: UUID -> user_id mapping
@@ -94,7 +92,6 @@ impl Panel {
 			client,
 			config,
 			running: RwLock::new(false),
-			shutdown: Notify::new(),
 			register_id: RwLock::new(None),
 			users: RwLock::new(HashMap::new()),
 		})
@@ -455,10 +452,13 @@ impl PanelService for Panel {
 		heartbeat_timer.tick().await;
 		report_timer.tick().await;
 
+		// Subscribe to shutdown signal from AppContext
+		let mut shutdown_rx = ctx.shutdown_tx.subscribe();
+
 		// Periodic tasks loop
 		loop {
 			tokio::select! {
-				_ = self.shutdown.notified() => {
+				_ = shutdown_rx.recv() => {
 					info!("Received shutdown signal, stopping periodic tasks");
 					break;
 				}
@@ -489,9 +489,6 @@ impl PanelService for Panel {
 
 	async fn close(&self) -> eyre::Result<()> {
 		info!("Panel service closing...");
-
-		// Signal shutdown to stop periodic tasks
-		self.shutdown.notify_waiters();
 
 		{
 			*self.running.write().await = false;
