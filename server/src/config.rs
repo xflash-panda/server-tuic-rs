@@ -55,7 +55,7 @@ pub struct Cli {
 	pub key_file: PathBuf,
 
 	/// Log mode
-	#[arg(long, value_name = "MODE", default_value = "info")]
+	#[arg(long = "log_mode", value_name = "MODE", default_value = "info")]
 	pub log_mode: LogLevel,
 
 	/// Server address (e.g., "https://api.example.com")
