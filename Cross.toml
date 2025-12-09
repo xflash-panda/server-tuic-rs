@@ -2,9 +2,3 @@
 
 [build.env]
 passthrough = ["RUSTFLAGS", "RUST_LOG"]
-
-[target.mips-unknown-linux-musl]
-image = "ghcr.io/cross-rs/mips-unknown-linux-musl:edge"
-
-[target.mipsel-unknown-linux-musl]
-image = "ghcr.io/cross-rs/mipsel-unknown-linux-musl:edge"

@@ -43,14 +43,6 @@ jobs:
             os: ubuntu-latest
             cross: true
 
-          # MIPS (from Cross.toml)
-          - target: mips-unknown-linux-musl
-            os: ubuntu-latest
-            cross: true
-          - target: mipsel-unknown-linux-musl
-            os: ubuntu-latest
-            cross: true
-
           # macOS
           - target: x86_64-apple-darwin
             os: macos-latest
