@@ -469,7 +469,7 @@ mod tests {
 		// Temporarily set command line arguments for clap to parse
 		let os_args = vec![
 			"test_binary".to_owned(),
-			"--ext-conf-file".to_owned(),
+			"--ext_conf_file".to_owned(),
 			config_path.to_string_lossy().into_owned(),
 			"--api".to_owned(),
 			"https://api.example.com".to_owned(),
@@ -519,7 +519,7 @@ mod tests {
 		// Test non-existent configuration files - should fail when trying to parse
 		let result = Cli::try_parse_from(vec![
 			"test_binary",
-			"--ext-conf-file",
+			"--ext_conf_file",
 			"non_existent.toml",
 			"--api",
 			"https://api.example.com",
