@@ -1892,7 +1892,7 @@ dependencies = [
  "rustls-pemfile",
  "serde",
  "serde_json",
- "server-r-client 0.1.0 (git+https://github.com/xflash-panda/server-r-client.git?rev=8740565)",
+ "server-r-client 0.1.0 (git+https://github.com/xflash-panda/server-r-client.git?tag=v0.1.0)",
  "socket2 0.6.1",
  "tempfile",
  "thiserror 2.0.17",
@@ -1910,7 +1910,7 @@ dependencies = [
 [[package]]
 name = "server-r-client"
 version = "0.1.0"
-source = "git+https://github.com/xflash-panda/server-r-client?branch=dev#283bd70cf023f3bde4e036bf3965eabebacfc259"
+source = "git+https://github.com/xflash-panda/server-r-client.git?tag=v0.1.0#b361a483cdee117773dcf7325aa617ec6ff485a0"
 dependencies = [
  "reqwest",
  "serde",
@@ -1924,7 +1924,7 @@ dependencies = [
 [[package]]
 name = "server-r-client"
 version = "0.1.0"
-source = "git+https://github.com/xflash-panda/server-r-client.git?rev=8740565#87405658c559d705e3d01f2dcbbe8c6a97e10cad"
+source = "git+https://github.com/xflash-panda/server-r-client?branch=dev#283bd70cf023f3bde4e036bf3965eabebacfc259"
 dependencies = [
  "reqwest",
  "serde",
