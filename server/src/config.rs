@@ -39,7 +39,7 @@ impl std::error::Error for Control {}
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
 	/// Path to the external config file (optional)
-	#[arg(long, value_name = "PATH")]
+	#[arg(long = "ext_conf_file", value_name = "PATH")]
 	pub ext_conf_file: Option<PathBuf>,
 
 	/// Generate an example configuration file (config.toml)
@@ -47,11 +47,11 @@ pub struct Cli {
 	pub init: bool,
 
 	/// Path to the certificate file
-	#[arg(long, value_name = "PATH", default_value = "/root/.cert/server.crt")]
+	#[arg(long = "cert_file", value_name = "PATH", default_value = "/root/.cert/server.crt")]
 	pub cert_file: PathBuf,
 
 	/// Path to the private key file
-	#[arg(long, value_name = "PATH", default_value = "/root/.cert/server.key")]
+	#[arg(long = "key_file", value_name = "PATH", default_value = "/root/.cert/server.key")]
 	pub key_file: PathBuf,
 
 	/// Log mode
@@ -71,19 +71,19 @@ pub struct Cli {
 	pub node: u32,
 
 	/// API request cycle for fetching users (in seconds)
-	#[arg(long, value_name = "SECONDS", default_value = "60")]
+	#[arg(long = "fetch_users_interval", value_name = "SECONDS", default_value = "60")]
 	pub fetch_users_interval: u64,
 
 	/// API request cycle for reporting traffic stats (in seconds)
-	#[arg(long, value_name = "SECONDS", default_value = "80")]
+	#[arg(long = "report_traffics_interval", value_name = "SECONDS", default_value = "80")]
 	pub report_traffics_interval: u64,
 
 	/// API request cycle for heartbeat (in seconds)
-	#[arg(long, value_name = "SECONDS", default_value = "180")]
+	#[arg(long = "heartbeat_interval", value_name = "SECONDS", default_value = "180")]
 	pub heartbeat_interval: u64,
 
 	/// Data directory for persisting state and other data
-	#[arg(long, value_name = "PATH", default_value = "/var/lib/tuic-node")]
+	#[arg(long = "data_dir", value_name = "PATH", default_value = "/var/lib/tuic-node")]
 	pub data_dir: PathBuf,
 }
 
