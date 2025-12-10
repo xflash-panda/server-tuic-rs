@@ -16,6 +16,12 @@ const STATE_FILE: &str = "state.json";
 struct PanelState {
 	/// Registration ID obtained from API
 	register_id: Option<String>,
+	/// Node ID from API config
+	node_id: Option<i64>,
+	/// Server port from API config
+	server_port: Option<u16>,
+	/// Zero RTT handshake setting from API config
+	zero_rtt_handshake: Option<bool>,
 }
 
 fn get_hostname() -> String {
@@ -304,48 +310,35 @@ impl PanelService for Panel {
 			})?;
 		}
 
-		// Always fetch config from API to get server_port
-		let node_config = self
-			.client
-			.config(NodeType::Tuic, self.config.node_id as i64)
-			.await
-			.map_err(|e| {
-				error!("Failed to fetch config from API: {}", e);
-				eyre::eyre!("Failed to fetch config from API, cannot continue: {}", e)
-			})?;
-
-		info!("Successfully fetched node config: {:?}", node_config);
-
-		// Convert to TuicConfig
-		let tuic_config = match node_config {
-			NodeConfigEnum::Tuic(config) => config,
-			_ => {
-				error!("Expected Tuic config but got different type");
-				return Err(eyre::eyre!("Expected Tuic config but got different type, cannot continue"));
-			}
-		};
-
-		let server_port = tuic_config.server_port;
-		let zero_rtt_handshake = tuic_config.zero_rtt_handshake;
-		info!(
-			"Tuic config - server_port: {}, zero_rtt_handshake: {}, id: {}",
-			server_port, zero_rtt_handshake, tuic_config.id
-		);
-
-		// Update config with values from panel API
-		cfg.server_port = server_port;
-		cfg.zero_rtt_handshake = zero_rtt_handshake;
-
 		// Try to load existing state and verify register_id
 		let mut need_register = true;
+		let mut need_fetch_config = true;
+		let mut server_port: u16 = 0;
+		let mut zero_rtt_handshake = false;
+		let mut node_id: i64 = 0;
+
 		if let Some(state) = self.load_state() {
-			if let Some(saved_register_id) = state.register_id {
+			if let Some(saved_register_id) = &state.register_id {
 				info!("Found saved register_id, verifying...");
-				match self.client.verify(NodeType::Tuic, &saved_register_id).await {
+				match self.client.verify(NodeType::Tuic, saved_register_id).await {
 					Ok(true) => {
 						info!("Saved register_id is valid, skipping registration");
-						*self.register_id.write().await = Some(saved_register_id);
+						*self.register_id.write().await = Some(saved_register_id.clone());
 						need_register = false;
+
+						// Use cached config if available
+						if let (Some(port), Some(zero_rtt), Some(id)) =
+							(state.server_port, state.zero_rtt_handshake, state.node_id)
+						{
+							info!(
+								"Using cached config - server_port: {}, zero_rtt_handshake: {}, id: {}",
+								port, zero_rtt, id
+							);
+							server_port = port;
+							zero_rtt_handshake = zero_rtt;
+							node_id = id;
+							need_fetch_config = false;
+						}
 					}
 					Ok(false) => {
 						warn!("Saved register_id is invalid, will re-register");
@@ -358,6 +351,41 @@ impl PanelService for Panel {
 				}
 			}
 		}
+
+		// Fetch config from API if needed
+		if need_fetch_config {
+			let node_config = self
+				.client
+				.config(NodeType::Tuic, self.config.node_id as i64)
+				.await
+				.map_err(|e| {
+					error!("Failed to fetch config from API: {}", e);
+					eyre::eyre!("Failed to fetch config from API, cannot continue: {}", e)
+				})?;
+
+			info!("Successfully fetched node config: {:?}", node_config);
+
+			// Convert to TuicConfig
+			let tuic_config = match node_config {
+				NodeConfigEnum::Tuic(config) => config,
+				_ => {
+					error!("Expected Tuic config but got different type");
+					return Err(eyre::eyre!("Expected Tuic config but got different type, cannot continue"));
+				}
+			};
+
+			server_port = tuic_config.server_port;
+			zero_rtt_handshake = tuic_config.zero_rtt_handshake;
+			node_id = tuic_config.id;
+			info!(
+				"Tuic config - server_port: {}, zero_rtt_handshake: {}, id: {}",
+				server_port, zero_rtt_handshake, node_id
+			);
+		}
+
+		// Update config with values from panel API or cache
+		cfg.server_port = server_port;
+		cfg.zero_rtt_handshake = zero_rtt_handshake;
 
 		if need_register {
 			// Get hostname and register node
@@ -378,13 +406,24 @@ impl PanelService for Panel {
 			info!("Node registered successfully, register_id: {}", register_id);
 
 			// Save register_id for later use
-			{
-				*self.register_id.write().await = Some(register_id.clone());
-			}
+			*self.register_id.write().await = Some(register_id.clone());
 
-			// Persist state to file
+			// Persist state to file with all config info
 			let state = PanelState {
 				register_id: Some(register_id),
+				node_id: Some(node_id),
+				server_port: Some(server_port),
+				zero_rtt_handshake: Some(zero_rtt_handshake),
+			};
+			self.save_state(&state)?;
+		} else if need_fetch_config {
+			// Update state file with new config info (register_id unchanged)
+			let register_id = self.register_id.read().await.clone();
+			let state = PanelState {
+				register_id,
+				node_id: Some(node_id),
+				server_port: Some(server_port),
+				zero_rtt_handshake: Some(zero_rtt_handshake),
 			};
 			self.save_state(&state)?;
 		}
