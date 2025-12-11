@@ -2,6 +2,8 @@ name: Release
 
 on:
   push:
+    branches:
+      - 'dev/agent-master'
     tags:
       - 'av*'
   workflow_dispatch:
