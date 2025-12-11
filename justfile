@@ -1,2 +1,2 @@
 server:
-  cargo run --package server --bin server -- -c ./config.toml
+  cargo run --package server-agent --bin server-agent -- -c ./config.toml

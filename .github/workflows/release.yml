@@ -12,7 +12,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  BINARY_NAME: server
+  BINARY_NAME: server-agent
 
 jobs:
   build:
@@ -74,11 +74,11 @@ jobs:
 
       - name: Build (cross)
         if: matrix.cross
-        run: cross build --release -p server --target ${{ matrix.target }}
+        run: cross build --release -p server-agent --target ${{ matrix.target }}
 
       - name: Build (cargo)
         if: '!matrix.cross'
-        run: cargo build --release -p server --target ${{ matrix.target }}
+        run: cargo build --release -p server-agent --target ${{ matrix.target }}
 
       - name: Prepare artifact (Unix)
         if: runner.os != 'Windows'

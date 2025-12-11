@@ -1673,7 +1673,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "server"
+name = "server-agent"
 version = "0.1.1"
 dependencies = [
  "arc-swap",
@@ -1890,7 +1890,7 @@ dependencies = [
  "lexopt",
  "rustls",
  "serial_test",
- "server",
+ "server-agent",
  "server-r-client 0.1.1 (git+https://github.com/xflash-panda/server-r-client?branch=dev)",
  "tokio",
  "tracing",
