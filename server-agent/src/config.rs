@@ -59,7 +59,7 @@ pub struct Cli {
 	pub log_mode: LogLevel,
 
 	/// gRPC server host (e.g., "127.0.0.1")
-	#[arg(long = "host", value_name = "HOST", default_value = "127.0.0.1")]
+	#[arg(long = "server_host", value_name = "HOST", default_value = "127.0.0.1")]
 	pub host: String,
 
 	/// gRPC server port (e.g., 8082)
