@@ -1,11 +1,12 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
-use serde::{Deserialize, Deserializer, Serialize};
-use server_r_agent_proto::{
-	agent_client::AgentClient, ConfigRequest, ConfigResponse, HeartbeatRequest, NodeType,
-	RegisterRequest as GrpcRegisterRequest, SubmitRequest, UnregisterRequest, UsersRequest,
-	VerifyRequest,
+use serde::{Deserialize, Serialize};
+use server_r_agent_proto::pkg::{
+	agent_client::AgentClient, ConfigRequest, ConfigResponse, HeartbeatRequest,
+	NodeType as GrpcNodeType, RegisterRequest as GrpcRegisterRequest, SubmitRequest,
+	UnregisterRequest, UsersRequest, VerifyRequest,
 };
+use server_r_client::models::{parse_config, NodeType, TuicConfig};
 use tokio::sync::RwLock;
 use tonic::transport::Channel;
 use tracing::{error, info, warn};
@@ -69,37 +70,6 @@ pub struct PanelConfig {
 	pub heartbeat_interval: u64,
 	/// Data directory for persisting state and other data
 	pub data_dir: PathBuf,
-}
-
-/// Deserialize a boolean that might come as an integer (0/1)
-fn bool_from_int<'de, D>(deserializer: D) -> std::result::Result<bool, D::Error>
-where
-	D: Deserializer<'de>,
-{
-	#[derive(Deserialize)]
-	#[serde(untagged)]
-	enum BoolOrInt {
-		Bool(bool),
-		Int(i64),
-	}
-
-	match BoolOrInt::deserialize(deserializer)? {
-		BoolOrInt::Bool(b) => Ok(b),
-		BoolOrInt::Int(i) => Ok(i != 0),
-	}
-}
-
-/// TUIC configuration from server
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TuicConfig {
-	pub id: i64,
-	pub server_port: u16,
-	#[serde(default, deserialize_with = "bool_from_int")]
-	pub allow_insecure: bool,
-	#[serde(default)]
-	pub server_name: Option<String>,
-	#[serde(default, deserialize_with = "bool_from_int")]
-	pub zero_rtt_handshake: bool,
 }
 
 /// User information from server
@@ -298,7 +268,7 @@ impl Panel {
 
 		let request = tonic::Request::new(ConfigRequest {
 			node_id: self.config.node_id as i32,
-			node_type: NodeType::Tuic as i32,
+			node_type: GrpcNodeType::Tuic as i32,
 		});
 
 		let response = client
@@ -312,8 +282,13 @@ impl Panel {
 			return Err(eyre::eyre!("Server returned failure for config request"));
 		}
 
-		let tuic_config: TuicConfig = serde_json::from_slice(&config_response.raw_data)
-			.map_err(|e| eyre::eyre!("Failed to parse TuicConfig: {}", e))?;
+		let node_config = parse_config(NodeType::Tuic, &config_response.raw_data)
+			.map_err(|e| eyre::eyre!("Failed to parse config: {}", e))?;
+
+		let tuic_config = node_config
+			.as_tuic()
+			.map_err(|e| eyre::eyre!("Failed to get TuicConfig: {}", e))?
+			.clone();
 
 		Ok(tuic_config)
 	}
@@ -324,7 +299,7 @@ impl Panel {
 
 		let request = tonic::Request::new(GrpcRegisterRequest {
 			node_id: self.config.node_id as i32,
-			node_type: NodeType::Tuic as i32,
+			node_type: GrpcNodeType::Tuic as i32,
 			host_name: hostname,
 			port: port.to_string(),
 			ip: String::new(),
@@ -343,7 +318,7 @@ impl Panel {
 		let mut client = self.get_client().await?;
 
 		let request = tonic::Request::new(VerifyRequest {
-			node_type: NodeType::Tuic as i32,
+			node_type: GrpcNodeType::Tuic as i32,
 			register_id: register_id.to_string(),
 		});
 
@@ -364,7 +339,7 @@ impl Panel {
 		let mut client = self.get_client().await?;
 
 		let request = tonic::Request::new(UsersRequest {
-			node_type: NodeType::Tuic as i32,
+			node_type: GrpcNodeType::Tuic as i32,
 			register_id: register_id.clone(),
 		});
 
@@ -436,7 +411,7 @@ impl Panel {
 		let mut client = self.get_client().await?;
 
 		let request = tonic::Request::new(HeartbeatRequest {
-			node_type: NodeType::Tuic as i32,
+			node_type: GrpcNodeType::Tuic as i32,
 			register_id,
 		});
 
@@ -490,7 +465,7 @@ impl Panel {
 		let mut client = self.get_client().await?;
 
 		let request = tonic::Request::new(SubmitRequest {
-			node_type: NodeType::Tuic as i32,
+			node_type: GrpcNodeType::Tuic as i32,
 			register_id,
 			raw_data,
 			raw_stats,
@@ -517,7 +492,7 @@ impl Panel {
 		let mut client = self.get_client().await?;
 
 		let request = tonic::Request::new(UnregisterRequest {
-			node_type: NodeType::Tuic as i32,
+			node_type: GrpcNodeType::Tuic as i32,
 			register_id: register_id.to_string(),
 		});
 

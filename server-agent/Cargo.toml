@@ -34,7 +34,8 @@ tuic = { package = "core", path = "../core", default-features = false, features 
 register-count = { version = "0.1.0", default-features = false, features = ["std"] }
 
 # Panel gRPC Client
-server-r-agent-proto = { git = "https://github.com/xflash-panda/server-r-agent-proto.git", tag = "v0.1.0" }
+server-r-agent-proto = { git = "https://github.com/xflash-panda/server-r-agent-proto.git", tag = "v0.1.1" }
+server-r-client = { git = "https://github.com/xflash-panda/server-r-client", branch = "dev" }
 tonic = "0.14"
 hostname = "0.4"
 
