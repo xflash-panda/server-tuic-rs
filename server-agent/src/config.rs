@@ -58,13 +58,13 @@ pub struct Cli {
 	#[arg(long = "log_mode", value_name = "MODE", default_value = "info")]
 	pub log_mode: LogLevel,
 
-	/// Server address (e.g., "https://api.example.com")
-	#[arg(long, value_name = "URL")]
-	pub api: String,
+	/// gRPC server host (e.g., "127.0.0.1")
+	#[arg(long = "host", value_name = "HOST", default_value = "127.0.0.1")]
+	pub host: String,
 
-	/// Token of server API
-	#[arg(long, value_name = "TOKEN")]
-	pub token: String,
+	/// gRPC server port (e.g., 8082)
+	#[arg(long = "port", value_name = "PORT", default_value = "8082")]
+	pub port: u16,
 
 	/// Node ID
 	#[arg(long, value_name = "ID")]
@@ -438,10 +438,9 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 
 	// Set panel configuration (required fields)
 	config.panel = Some(crate::panel::PanelConfig {
-		api_host:                 cli.api,
-		token:                    cli.token,
+		server_host:              cli.host,
+		server_port:              cli.port,
 		node_id:                  cli.node,
-		timeout:                  30,
 		fetch_users_interval:     cli.fetch_users_interval,
 		report_traffics_interval: cli.report_traffics_interval,
 		heartbeat_interval:       cli.heartbeat_interval,
@@ -471,10 +470,6 @@ mod tests {
 			"test_binary".to_owned(),
 			"--ext_conf_file".to_owned(),
 			config_path.to_string_lossy().into_owned(),
-			"--api".to_owned(),
-			"https://api.example.com".to_owned(),
-			"--token".to_owned(),
-			"test-token".to_owned(),
 			"--node".to_owned(),
 			"1".to_owned(),
 		];
@@ -521,10 +516,6 @@ mod tests {
 			"test_binary",
 			"--ext_conf_file",
 			"non_existent.toml",
-			"--api",
-			"https://api.example.com",
-			"--token",
-			"test-token",
 			"--node",
 			"1",
 		]);
@@ -537,7 +528,7 @@ mod tests {
 
 		// Test missing required parameters - should fail
 		let result = Cli::try_parse_from(vec!["test_binary"]);
-		// This should fail because --api, --token, --node are required
+		// This should fail because --node is required
 		assert!(result.is_err());
 	}
 

@@ -1,8 +1,13 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
-use serde::{Deserialize, Serialize};
-use server_r_client::{ApiClient, ApiError, Config as ApiConfig, NodeConfigEnum, NodeType, RegisterRequest, UserTraffic};
+use serde::{Deserialize, Deserializer, Serialize};
+use server_r_agent_proto::{
+	agent_client::AgentClient, ConfigRequest, ConfigResponse, HeartbeatRequest, NodeType,
+	RegisterRequest as GrpcRegisterRequest, SubmitRequest, UnregisterRequest, UsersRequest,
+	VerifyRequest,
+};
 use tokio::sync::RwLock;
+use tonic::transport::Channel;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -50,48 +55,139 @@ pub trait PanelService: Send + Sync {
 /// Configuration for the panel service
 #[derive(Debug, Clone)]
 pub struct PanelConfig {
-	/// API host URL (e.g., "https://api.example.com")
-	pub api_host:                 String,
-	/// Authentication token
-	pub token:                    String,
+	/// gRPC server host (e.g., "127.0.0.1")
+	pub server_host: String,
+	/// gRPC server port (e.g., 50051)
+	pub server_port: u16,
 	/// Node ID for this server
-	pub node_id:                  u32,
-	/// Request timeout in seconds
-	pub timeout:                  u64,
+	pub node_id: u32,
 	/// Interval for fetching users from API (in seconds)
-	pub fetch_users_interval:     u64,
+	pub fetch_users_interval: u64,
 	/// Interval for reporting traffic stats to API (in seconds)
 	pub report_traffics_interval: u64,
 	/// Interval for sending heartbeat to API (in seconds)
-	pub heartbeat_interval:       u64,
+	pub heartbeat_interval: u64,
 	/// Data directory for persisting state and other data
-	pub data_dir:                 PathBuf,
+	pub data_dir: PathBuf,
+}
+
+/// Deserialize a boolean that might come as an integer (0/1)
+fn bool_from_int<'de, D>(deserializer: D) -> std::result::Result<bool, D::Error>
+where
+	D: Deserializer<'de>,
+{
+	#[derive(Deserialize)]
+	#[serde(untagged)]
+	enum BoolOrInt {
+		Bool(bool),
+		Int(i64),
+	}
+
+	match BoolOrInt::deserialize(deserializer)? {
+		BoolOrInt::Bool(b) => Ok(b),
+		BoolOrInt::Int(i) => Ok(i != 0),
+	}
+}
+
+/// TUIC configuration from server
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TuicConfig {
+	pub id: i64,
+	pub server_port: u16,
+	#[serde(default, deserialize_with = "bool_from_int")]
+	pub allow_insecure: bool,
+	#[serde(default)]
+	pub server_name: Option<String>,
+	#[serde(default, deserialize_with = "bool_from_int")]
+	pub zero_rtt_handshake: bool,
+}
+
+/// User information from server
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct User {
+	pub id: i64,
+	pub uuid: String,
+}
+
+/// User traffic data for submission
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserTraffic {
+	pub user_id: i64,
+	/// Upload bytes
+	pub u: u64,
+	/// Download bytes
+	pub d: u64,
+	/// Count/connections
+	#[serde(default)]
+	pub n: u64,
+}
+
+impl UserTraffic {
+	/// Create a new UserTraffic instance with connection count
+	pub fn with_count(user_id: i64, upload: u64, download: u64, count: u64) -> Self {
+		Self {
+			user_id,
+			u: upload,
+			d: download,
+			n: count,
+		}
+	}
+}
+
+/// Aggregated traffic statistics
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TrafficStats {
+	/// Total count
+	pub count: i64,
+	/// Total requests
+	pub requests: i64,
+	/// User IDs
+	pub user_ids: Vec<i64>,
+	/// Per-user request counts
+	#[serde(default)]
+	pub user_requests: std::collections::HashMap<i64, i64>,
+}
+
+impl TrafficStats {
+	/// Create a new empty TrafficStats instance
+	pub fn new() -> Self {
+		Self {
+			count: 0,
+			requests: 0,
+			user_ids: Vec::new(),
+			user_requests: std::collections::HashMap::new(),
+		}
+	}
+
+	/// Add a user's request count
+	pub fn add_user(&mut self, user_id: i64, requests: i64) {
+		self.user_ids.push(user_id);
+		self.user_requests.insert(user_id, requests);
+		self.requests += requests;
+		self.count += 1;
+	}
 }
 
 /// User data stored in Panel
 /// Maps UUID -> user_id (i64)
 type UserMap = HashMap<Uuid, i64>;
 
-/// Panel service implementation using server-r-client
+/// Panel service implementation using gRPC client
 pub struct Panel {
-	client:      ApiClient,
-	config:      PanelConfig,
-	running:     RwLock<bool>,
+	client: RwLock<Option<AgentClient<Channel>>>,
+	config: PanelConfig,
+	running: RwLock<bool>,
 	/// Registration ID obtained from API during init
 	register_id: RwLock<Option<String>>,
 	/// User data: UUID -> user_id mapping
-	users:       RwLock<UserMap>,
+	users: RwLock<UserMap>,
 }
 
 impl Panel {
 	/// Create a new Panel instance
 	pub fn new(config: PanelConfig) -> eyre::Result<Self> {
-		let api_config = ApiConfig::new(&config.api_host, &config.token).with_timeout(Duration::from_secs(config.timeout));
-
-		let client = ApiClient::new(api_config).map_err(|e| eyre::eyre!("Failed to create API client: {}", e))?;
-
 		Ok(Self {
-			client,
+			client: RwLock::new(None),
 			config,
 			running: RwLock::new(false),
 			register_id: RwLock::new(None),
@@ -99,9 +195,33 @@ impl Panel {
 		})
 	}
 
-	/// Get a reference to the API client
-	pub fn client(&self) -> &ApiClient {
-		&self.client
+	/// Connect to the gRPC server
+	async fn connect(&self) -> eyre::Result<AgentClient<Channel>> {
+		let endpoint = format!("http://{}:{}", self.config.server_host, self.config.server_port);
+		info!("Connecting to gRPC server at {}", endpoint);
+
+		let channel = Channel::from_shared(endpoint.clone())
+			.map_err(|e| eyre::eyre!("Invalid endpoint: {}", e))?
+			.connect()
+			.await
+			.map_err(|e| eyre::eyre!("Failed to connect to gRPC server {}: {}", endpoint, e))?;
+
+		let client = AgentClient::new(channel);
+		info!("Connected to gRPC server");
+		Ok(client)
+	}
+
+	/// Get or create gRPC client
+	async fn get_client(&self) -> eyre::Result<AgentClient<Channel>> {
+		let client_guard = self.client.read().await;
+		if let Some(client) = client_guard.clone() {
+			return Ok(client);
+		}
+		drop(client_guard);
+
+		let client = self.connect().await?;
+		*self.client.write().await = Some(client.clone());
+		Ok(client)
 	}
 
 	/// Get the node ID
@@ -172,93 +292,168 @@ impl Panel {
 		}
 	}
 
-	/// Fetch users from API and update local storage
+	/// Fetch config from gRPC server
+	async fn fetch_config(&self) -> eyre::Result<TuicConfig> {
+		let mut client = self.get_client().await?;
+
+		let request = tonic::Request::new(ConfigRequest {
+			node_id: self.config.node_id as i32,
+			node_type: NodeType::Tuic as i32,
+		});
+
+		let response = client
+			.config(request)
+			.await
+			.map_err(|e| eyre::eyre!("gRPC config request failed: {}", e))?;
+
+		let config_response: ConfigResponse = response.into_inner();
+
+		if !config_response.result {
+			return Err(eyre::eyre!("Server returned failure for config request"));
+		}
+
+		let tuic_config: TuicConfig = serde_json::from_slice(&config_response.raw_data)
+			.map_err(|e| eyre::eyre!("Failed to parse TuicConfig: {}", e))?;
+
+		Ok(tuic_config)
+	}
+
+	/// Register node with gRPC server
+	async fn register_node(&self, hostname: String, port: u16) -> eyre::Result<String> {
+		let mut client = self.get_client().await?;
+
+		let request = tonic::Request::new(GrpcRegisterRequest {
+			node_id: self.config.node_id as i32,
+			node_type: NodeType::Tuic as i32,
+			host_name: hostname,
+			port: port.to_string(),
+			ip: String::new(),
+		});
+
+		let response = client
+			.register(request)
+			.await
+			.map_err(|e| eyre::eyre!("gRPC register request failed: {}", e))?;
+
+		Ok(response.into_inner().register_id)
+	}
+
+	/// Verify register_id with gRPC server
+	async fn verify_register_id(&self, register_id: &str) -> eyre::Result<bool> {
+		let mut client = self.get_client().await?;
+
+		let request = tonic::Request::new(VerifyRequest {
+			node_type: NodeType::Tuic as i32,
+			register_id: register_id.to_string(),
+		});
+
+		let response = client
+			.verify(request)
+			.await
+			.map_err(|e| eyre::eyre!("gRPC verify request failed: {}", e))?;
+
+		Ok(response.into_inner().result)
+	}
+
+	/// Fetch users from gRPC server and update local storage
 	/// Returns the total number of users after update
 	async fn fetch_users(&self) -> eyre::Result<usize> {
 		let register_id = self.register_id.read().await.clone();
 		let register_id = register_id.ok_or_else(|| eyre::eyre!("No register_id available"))?;
 
-		match self.client.users(NodeType::Tuic, &register_id).await {
-			Ok(users) => {
-				// Build new user map from API response
-				let mut new_user_map: UserMap = HashMap::new();
-				for user in &users {
-					if let Ok(uuid) = Uuid::parse_str(&user.uuid) {
-						new_user_map.insert(uuid, user.id);
-					} else {
-						warn!("Invalid UUID format for user {}: {}", user.id, user.uuid);
-					}
-				}
+		let mut client = self.get_client().await?;
 
-				// Compare with existing users and update
-				let mut user_map = self.users.write().await;
+		let request = tonic::Request::new(UsersRequest {
+			node_type: NodeType::Tuic as i32,
+			register_id: register_id.clone(),
+		});
 
-				// Find users to remove (exist in current but not in new)
-				let removed: Vec<Uuid> = user_map
-					.keys()
-					.filter(|uuid| !new_user_map.contains_key(*uuid))
-					.copied()
-					.collect();
+		let response = client
+			.users(request)
+			.await
+			.map_err(|e| eyre::eyre!("gRPC users request failed: {}", e))?;
 
-				// Find users to add (exist in new but not in current)
-				let added: Vec<Uuid> = new_user_map
-					.keys()
-					.filter(|uuid| !user_map.contains_key(*uuid))
-					.copied()
-					.collect();
+		let users_response = response.into_inner();
+		let users: Vec<User> = serde_json::from_slice(&users_response.raw_data)
+			.map_err(|e| eyre::eyre!("Failed to parse users response: {}", e))?;
 
-				// Apply changes
-				for uuid in &removed {
-					user_map.remove(uuid);
-				}
-				for uuid in &added {
-					if let Some(user_id) = new_user_map.get(uuid) {
-						user_map.insert(*uuid, *user_id);
-					}
-				}
-
-				let count = user_map.len();
-				if !removed.is_empty() || !added.is_empty() {
-					info!(
-						"Users updated: {} added, {} removed, {} total",
-						added.len(),
-						removed.len(),
-						count
-					);
-				} else {
-					info!("Fetched {} users from API (no changes)", count);
-				}
-				Ok(count)
-			}
-			Err(ApiError::NotModified { .. }) => {
-				info!("Users not modified (ETag match)");
-				Ok(self.users.read().await.len())
-			}
-			Err(e) => {
-				error!("Failed to fetch users: {}", e);
-				Err(eyre::eyre!("Failed to fetch users: {}", e))
+		// Build new user map from response
+		let mut new_user_map: UserMap = HashMap::new();
+		for user in &users {
+			if let Ok(uuid) = Uuid::parse_str(&user.uuid) {
+				new_user_map.insert(uuid, user.id);
+			} else {
+				warn!("Invalid UUID format for user {}: {}", user.id, user.uuid);
 			}
 		}
+
+		// Compare with existing users and update
+		let mut user_map = self.users.write().await;
+
+		// Find users to remove (exist in current but not in new)
+		let removed: Vec<Uuid> = user_map
+			.keys()
+			.filter(|uuid| !new_user_map.contains_key(*uuid))
+			.copied()
+			.collect();
+
+		// Find users to add (exist in new but not in current)
+		let added: Vec<Uuid> = new_user_map
+			.keys()
+			.filter(|uuid| !user_map.contains_key(*uuid))
+			.copied()
+			.collect();
+
+		// Apply changes
+		for uuid in &removed {
+			user_map.remove(uuid);
+		}
+		for uuid in &added {
+			if let Some(user_id) = new_user_map.get(uuid) {
+				user_map.insert(*uuid, *user_id);
+			}
+		}
+
+		let count = user_map.len();
+		if !removed.is_empty() || !added.is_empty() {
+			info!(
+				"Users updated: {} added, {} removed, {} total",
+				added.len(),
+				removed.len(),
+				count
+			);
+		} else {
+			info!("Fetched {} users from server (no changes)", count);
+		}
+		Ok(count)
 	}
 
-	/// Send heartbeat to API server
+	/// Send heartbeat to gRPC server
 	async fn send_heartbeat(&self) -> eyre::Result<()> {
 		let register_id = self.register_id.read().await.clone();
 		let register_id = register_id.ok_or_else(|| eyre::eyre!("No register_id available"))?;
 
-		match self.client.heartbeat(NodeType::Tuic, &register_id).await {
-			Ok(()) => {
-				info!("Heartbeat sent successfully");
-				Ok(())
-			}
-			Err(e) => {
-				error!("Failed to send heartbeat: {}", e);
-				Err(eyre::eyre!("Failed to send heartbeat: {}", e))
-			}
+		let mut client = self.get_client().await?;
+
+		let request = tonic::Request::new(HeartbeatRequest {
+			node_type: NodeType::Tuic as i32,
+			register_id,
+		});
+
+		let response = client
+			.heartbeat(request)
+			.await
+			.map_err(|e| eyre::eyre!("gRPC heartbeat request failed: {}", e))?;
+
+		if response.into_inner().result {
+			info!("Heartbeat sent successfully");
+			Ok(())
+		} else {
+			Err(eyre::eyre!("Heartbeat failed: server returned false"))
 		}
 	}
 
-	/// Submit traffic statistics to API server
+	/// Submit traffic statistics to gRPC server
 	/// Only resets counters on successful submission to avoid data loss
 	async fn submit_traffic(&self, ctx: &AppContext) -> eyre::Result<()> {
 		let register_id = self.register_id.read().await.clone();
@@ -280,18 +475,62 @@ impl Panel {
 		}
 
 		let count = traffic_list.len();
-		match self.client.submit(NodeType::Tuic, &register_id, traffic_list).await {
-			Ok(()) => {
-				// Only reset counters after successful submission
-				crate::stats::reset_all_traffic(ctx).await;
-				info!("Traffic submitted successfully ({} users)", count);
-				Ok(())
-			}
-			Err(e) => {
-				// Keep the data for next submission attempt
-				error!("Failed to submit traffic: {}, data retained for next attempt", e);
-				Err(eyre::eyre!("Failed to submit traffic: {}", e))
-			}
+
+		// Build TrafficStats for raw_stats
+		let mut stats = TrafficStats::new();
+		for traffic in &traffic_list {
+			stats.add_user(traffic.user_id, traffic.n as i64);
+		}
+
+		let raw_data = serde_json::to_vec(&traffic_list)
+			.map_err(|e| eyre::eyre!("Failed to serialize traffic data: {}", e))?;
+		let raw_stats =
+			serde_json::to_vec(&stats).map_err(|e| eyre::eyre!("Failed to serialize traffic stats: {}", e))?;
+
+		let mut client = self.get_client().await?;
+
+		let request = tonic::Request::new(SubmitRequest {
+			node_type: NodeType::Tuic as i32,
+			register_id,
+			raw_data,
+			raw_stats,
+		});
+
+		let response = client
+			.submit(request)
+			.await
+			.map_err(|e| eyre::eyre!("gRPC submit request failed: {}", e))?;
+
+		if response.into_inner().result {
+			// Only reset counters after successful submission
+			crate::stats::reset_all_traffic(ctx).await;
+			info!("Traffic submitted successfully ({} users)", count);
+			Ok(())
+		} else {
+			error!("Failed to submit traffic: server returned false, data retained for next attempt");
+			Err(eyre::eyre!("Failed to submit traffic: server returned false"))
+		}
+	}
+
+	/// Unregister node from gRPC server
+	async fn unregister_node(&self, register_id: &str) -> eyre::Result<()> {
+		let mut client = self.get_client().await?;
+
+		let request = tonic::Request::new(UnregisterRequest {
+			node_type: NodeType::Tuic as i32,
+			register_id: register_id.to_string(),
+		});
+
+		let response = client
+			.unregister(request)
+			.await
+			.map_err(|e| eyre::eyre!("gRPC unregister request failed: {}", e))?;
+
+		if response.into_inner().result {
+			info!("Node unregistered successfully");
+			Ok(())
+		} else {
+			Err(eyre::eyre!("Unregister failed: server returned false"))
 		}
 	}
 }
@@ -320,7 +559,7 @@ impl PanelService for Panel {
 		if let Some(state) = self.load_state() {
 			if let Some(saved_register_id) = &state.register_id {
 				info!("Found saved register_id, verifying...");
-				match self.client.verify(NodeType::Tuic, saved_register_id).await {
+				match self.verify_register_id(saved_register_id).await {
 					Ok(true) => {
 						info!("Saved register_id is valid, skipping registration");
 						*self.register_id.write().await = Some(saved_register_id.clone());
@@ -352,27 +591,14 @@ impl PanelService for Panel {
 			}
 		}
 
-		// Fetch config from API if needed
+		// Fetch config from gRPC server if needed
 		if need_fetch_config {
-			let node_config = self
-				.client
-				.config(NodeType::Tuic, self.config.node_id as i64)
-				.await
-				.map_err(|e| {
-					error!("Failed to fetch config from API: {}", e);
-					eyre::eyre!("Failed to fetch config from API, cannot continue: {}", e)
-				})?;
+			let tuic_config = self.fetch_config().await.map_err(|e| {
+				error!("Failed to fetch config from server: {}", e);
+				eyre::eyre!("Failed to fetch config from server, cannot continue: {}", e)
+			})?;
 
-			info!("Successfully fetched node config: {:?}", node_config);
-
-			// Convert to TuicConfig
-			let tuic_config = match node_config {
-				NodeConfigEnum::Tuic(config) => config,
-				_ => {
-					error!("Expected Tuic config but got different type");
-					return Err(eyre::eyre!("Expected Tuic config but got different type, cannot continue"));
-				}
-			};
+			info!("Successfully fetched node config: {:?}", tuic_config);
 
 			server_port = tuic_config.server_port;
 			zero_rtt_handshake = tuic_config.zero_rtt_handshake;
@@ -390,18 +616,13 @@ impl PanelService for Panel {
 		if need_register {
 			// Get hostname and register node
 			let hostname = get_hostname();
-			let register_request = RegisterRequest::new(hostname.clone(), server_port);
 
 			info!("Registering node with hostname: {}, port: {}", hostname, server_port);
 
-			let register_id = self
-				.client
-				.register(NodeType::Tuic, self.config.node_id as i64, register_request)
-				.await
-				.map_err(|e| {
-					error!("Failed to register node: {}", e);
-					eyre::eyre!("Failed to register node, cannot continue: {}", e)
-				})?;
+			let register_id = self.register_node(hostname, server_port).await.map_err(|e| {
+				error!("Failed to register node: {}", e);
+				eyre::eyre!("Failed to register node, cannot continue: {}", e)
+			})?;
 
 			info!("Node registered successfully, register_id: {}", register_id);
 
@@ -509,7 +730,7 @@ impl PanelService for Panel {
 		let register_id = self.register_id.read().await.clone();
 		if let Some(rid) = register_id {
 			info!("Unregistering node with register_id: {}", rid);
-			match self.client.unregister(NodeType::Tuic, &rid).await {
+			match self.unregister_node(&rid).await {
 				Ok(()) => {
 					info!("Node unregistered successfully");
 					// Clear state file after successful unregister

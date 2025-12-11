@@ -38,7 +38,10 @@ pub struct AppContext {
 pub async fn run(mut cfg: Config) -> eyre::Result<()> {
 	// Initialize panel service if configured
 	let panel_service = if let Some(panel_cfg) = &cfg.panel {
-		info!("Panel service enabled, connecting to {}", panel_cfg.api_host);
+		info!(
+			"Panel service enabled, connecting to {}:{}",
+			panel_cfg.server_host, panel_cfg.server_port
+		);
 		let panel = Panel::new(panel_cfg.clone())?;
 		OptionalPanel::with_panel(panel)
 	} else {
