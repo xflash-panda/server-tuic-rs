@@ -1967,7 +1967,7 @@ dependencies = [
  "serde",
  "serde_json",
  "server-r-agent-proto",
- "server-r-client",
+ "server-r-client 0.1.2",
  "socket2 0.6.1",
  "tempfile",
  "thiserror 2.0.17",
@@ -1997,6 +1997,20 @@ dependencies = [
 name = "server-r-client"
 version = "0.1.1"
 source = "git+https://github.com/xflash-panda/server-r-client?branch=dev#0ac6e84c29f02069895978881951fcf1410d814a"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "server-r-client"
+version = "0.1.2"
+source = "git+https://github.com/xflash-panda/server-r-client?tag=v0.1.2#fe488f3906b6fa8748c1987441cdff9b4bd9a7ec"
 dependencies = [
  "reqwest",
  "serde",
@@ -2155,7 +2169,7 @@ dependencies = [
  "rustls",
  "serial_test",
  "server-agent",
- "server-r-client",
+ "server-r-client 0.1.1",
  "tokio",
  "tracing",
  "tracing-test",
