@@ -1,5 +1,5 @@
 [package]
-name = "tuic"
+name = "core"
 version.workspace = true
 authors.workspace = true
 description = "Core implementation of TUIC protocol with QUIC integration"
@@ -35,7 +35,7 @@ tokio = { version = "1", default-features = false, features = ["io-util"] }
 eyre = { version = "0.6" }
 
 [dev-dependencies]
-tuic = { path = ".", features = ["async_marshal", "marshal", "model"] }
+core = { path = ".", features = ["async_marshal", "marshal", "model"] }
 uuid = { version = "1", features = ["v4"] }
 serde_json = { version = "1" }
 tokio = { version = "1", default-features = false, features = ["macros", "rt", "net", "io-util", "time"] }

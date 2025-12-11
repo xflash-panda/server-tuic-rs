@@ -1,4 +1,4 @@
-// Re-export common types from tuic
+// Re-export common types from core
 pub use tuic::{StackPrefer, UdpRelayMode};
 
 // Type alias for backward compatibility

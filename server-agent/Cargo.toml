@@ -29,8 +29,8 @@ moka = { version = "0.12", features = ["future"] }
 # QUIC
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "log"] }
 
-# TUIC
-tuic = { path = "../tuic", default-features = false, features = ["async_marshal", "marshal", "model"] }
+# Core
+tuic = { package = "core", path = "../core", default-features = false, features = ["async_marshal", "marshal", "model"] }
 register-count = { version = "0.1.0", default-features = false, features = ["std"] }
 
 # Panel API Client

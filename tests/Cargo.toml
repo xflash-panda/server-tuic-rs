@@ -16,7 +16,7 @@ deplog = ["tracing-test/no-env-filter"]
 
 [dependencies]
 # Core dependencies for integration tests
-tuic = { path = "../tuic", default-features = false, features = ["async_marshal", "marshal", "model"] }
+tuic = { package = "core", path = "../core", default-features = false, features = ["async_marshal", "marshal", "model"] }
 server-agent = { path = "../server-agent", default-features = false }
 
 # Required dependencies
