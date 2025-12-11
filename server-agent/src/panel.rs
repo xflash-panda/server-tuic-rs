@@ -6,7 +6,7 @@ use server_r_agent_proto::pkg::{
 	NodeType as GrpcNodeType, RegisterRequest as GrpcRegisterRequest, SubmitRequest,
 	UnregisterRequest, UsersRequest, VerifyRequest,
 };
-use server_r_client::models::{parse_config, NodeType, TuicConfig};
+use server_r_client::models::{parse_raw_config_response, NodeType, TuicConfig};
 use tokio::sync::RwLock;
 use tonic::transport::Channel;
 use tracing::{debug, error, info, warn};
@@ -285,7 +285,7 @@ impl Panel {
 		let raw_data_str = String::from_utf8_lossy(&config_response.raw_data);
 		debug!("Raw config data from server: {}", raw_data_str);
 
-		let node_config = parse_config(NodeType::Tuic, &config_response.raw_data)
+		let node_config = parse_raw_config_response(NodeType::Tuic, &config_response.raw_data)
 			.map_err(|e| eyre::eyre!("Failed to parse config: {} - raw_data: {}", e, raw_data_str))?;
 
 		let tuic_config = node_config
