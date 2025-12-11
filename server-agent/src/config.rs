@@ -83,7 +83,7 @@ pub struct Cli {
 	pub heartbeat_interval: u64,
 
 	/// Data directory for persisting state and other data
-	#[arg(long = "data_dir", value_name = "PATH", default_value = "/var/lib/tuic-node")]
+	#[arg(long = "data_dir", value_name = "PATH", default_value = "/var/lib/tuic-agent-node")]
 	pub data_dir: PathBuf,
 }
 
