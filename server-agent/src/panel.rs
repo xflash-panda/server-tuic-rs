@@ -6,7 +6,7 @@ use server_r_agent_proto::pkg::{
 	NodeType as GrpcNodeType, RegisterRequest as GrpcRegisterRequest, SubmitRequest,
 	UnregisterRequest, UsersRequest, VerifyRequest,
 };
-use server_r_client::models::{parse_raw_config_response, NodeType, TuicConfig};
+use server_r_client::models::{parse_raw_config_response, unmarshal_users, NodeType, TuicConfig};
 use tokio::sync::RwLock;
 use tonic::transport::Channel;
 use tracing::{debug, error, info, warn};
@@ -352,8 +352,16 @@ impl Panel {
 			.map_err(|e| eyre::eyre!("gRPC users request failed: {}", e))?;
 
 		let users_response = response.into_inner();
-		let users: Vec<User> = serde_json::from_slice(&users_response.raw_data)
-			.map_err(|e| eyre::eyre!("Failed to parse users response: {}", e))?;
+		let raw_data_str = String::from_utf8_lossy(&users_response.raw_data);
+		debug!("Raw users data from server: {}", raw_data_str);
+
+		let parsed_users = unmarshal_users(&users_response.raw_data)
+			.map_err(|e| eyre::eyre!("Failed to parse users response: {} - raw_data: {}", e, raw_data_str))?;
+
+		let users: Vec<User> = parsed_users
+			.into_iter()
+			.map(|u| User { id: u.id, uuid: u.uuid })
+			.collect();
 
 		// Build new user map from response
 		let mut new_user_map: UserMap = HashMap::new();
