@@ -2,11 +2,10 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use server_r_agent_proto::pkg::{
-	agent_client::AgentClient, ConfigRequest, ConfigResponse, HeartbeatRequest,
-	NodeType as GrpcNodeType, RegisterRequest as GrpcRegisterRequest, SubmitRequest,
-	UnregisterRequest, UsersRequest, VerifyRequest,
+	ConfigRequest, ConfigResponse, HeartbeatRequest, NodeType as GrpcNodeType, RegisterRequest as GrpcRegisterRequest,
+	SubmitRequest, UnregisterRequest, UsersRequest, VerifyRequest, agent_client::AgentClient,
 };
-use server_r_client::models::{parse_raw_config_response, unmarshal_users, NodeType, TuicConfig};
+use server_r_client::models::{NodeType, TuicConfig, parse_raw_config_response, unmarshal_users};
 use tokio::sync::RwLock;
 use tonic::transport::Channel;
 use tracing::{debug, error, info, warn};
@@ -21,11 +20,11 @@ const STATE_FILE: &str = "state.json";
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct PanelState {
 	/// Registration ID obtained from API
-	register_id: Option<String>,
+	register_id:        Option<String>,
 	/// Node ID from API config
-	node_id: Option<i64>,
+	node_id:            Option<i64>,
 	/// Server port from API config
-	server_port: Option<u16>,
+	server_port:        Option<u16>,
 	/// Zero RTT handshake setting from API config
 	zero_rtt_handshake: Option<bool>,
 }
@@ -57,25 +56,25 @@ pub trait PanelService: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct PanelConfig {
 	/// gRPC server host (e.g., "127.0.0.1")
-	pub server_host: String,
+	pub server_host:              String,
 	/// gRPC server port (e.g., 50051)
-	pub server_port: u16,
+	pub server_port:              u16,
 	/// Node ID for this server
-	pub node_id: u32,
+	pub node_id:                  u32,
 	/// Interval for fetching users from API (in seconds)
-	pub fetch_users_interval: u64,
+	pub fetch_users_interval:     u64,
 	/// Interval for reporting traffic stats to API (in seconds)
 	pub report_traffics_interval: u64,
 	/// Interval for sending heartbeat to API (in seconds)
-	pub heartbeat_interval: u64,
+	pub heartbeat_interval:       u64,
 	/// Data directory for persisting state and other data
-	pub data_dir: PathBuf,
+	pub data_dir:                 PathBuf,
 }
 
 /// User information from server
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
-	pub id: i64,
+	pub id:   i64,
 	pub uuid: String,
 }
 
@@ -84,12 +83,12 @@ pub struct User {
 pub struct UserTraffic {
 	pub user_id: i64,
 	/// Upload bytes
-	pub u: u64,
+	pub u:       u64,
 	/// Download bytes
-	pub d: u64,
+	pub d:       u64,
 	/// Count/connections
 	#[serde(default)]
-	pub n: u64,
+	pub n:       u64,
 }
 
 impl UserTraffic {
@@ -108,11 +107,11 @@ impl UserTraffic {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TrafficStats {
 	/// Total count
-	pub count: i64,
+	pub count:         i64,
 	/// Total requests
-	pub requests: i64,
+	pub requests:      i64,
 	/// User IDs
-	pub user_ids: Vec<i64>,
+	pub user_ids:      Vec<i64>,
 	/// Per-user request counts
 	#[serde(default)]
 	pub user_requests: std::collections::HashMap<i64, i64>,
@@ -122,9 +121,9 @@ impl TrafficStats {
 	/// Create a new empty TrafficStats instance
 	pub fn new() -> Self {
 		Self {
-			count: 0,
-			requests: 0,
-			user_ids: Vec::new(),
+			count:         0,
+			requests:      0,
+			user_ids:      Vec::new(),
 			user_requests: std::collections::HashMap::new(),
 		}
 	}
@@ -144,13 +143,13 @@ type UserMap = HashMap<Uuid, i64>;
 
 /// Panel service implementation using gRPC client
 pub struct Panel {
-	client: RwLock<Option<AgentClient<Channel>>>,
-	config: PanelConfig,
-	running: RwLock<bool>,
+	client:      RwLock<Option<AgentClient<Channel>>>,
+	config:      PanelConfig,
+	running:     RwLock<bool>,
 	/// Registration ID obtained from API during init
 	register_id: RwLock<Option<String>>,
 	/// User data: UUID -> user_id mapping
-	users: RwLock<UserMap>,
+	users:       RwLock<UserMap>,
 }
 
 impl Panel {
@@ -267,7 +266,7 @@ impl Panel {
 		let mut client = self.get_client().await?;
 
 		let request = tonic::Request::new(ConfigRequest {
-			node_id: self.config.node_id as i32,
+			node_id:   self.config.node_id as i32,
 			node_type: GrpcNodeType::Tuic as i32,
 		});
 
@@ -301,11 +300,11 @@ impl Panel {
 		let mut client = self.get_client().await?;
 
 		let request = tonic::Request::new(GrpcRegisterRequest {
-			node_id: self.config.node_id as i32,
+			node_id:   self.config.node_id as i32,
 			node_type: GrpcNodeType::Tuic as i32,
 			host_name: hostname,
-			port: port.to_string(),
-			ip: String::new(),
+			port:      port.to_string(),
+			ip:        String::new(),
 		});
 
 		let response = client
@@ -321,7 +320,7 @@ impl Panel {
 		let mut client = self.get_client().await?;
 
 		let request = tonic::Request::new(VerifyRequest {
-			node_type: GrpcNodeType::Tuic as i32,
+			node_type:   GrpcNodeType::Tuic as i32,
 			register_id: register_id.to_string(),
 		});
 
@@ -342,7 +341,7 @@ impl Panel {
 		let mut client = self.get_client().await?;
 
 		let request = tonic::Request::new(UsersRequest {
-			node_type: GrpcNodeType::Tuic as i32,
+			node_type:   GrpcNodeType::Tuic as i32,
 			register_id: register_id.clone(),
 		});
 
@@ -360,7 +359,10 @@ impl Panel {
 
 		let users: Vec<User> = parsed_users
 			.into_iter()
-			.map(|u| User { id: u.id, uuid: u.uuid })
+			.map(|u| User {
+				id:   u.id,
+				uuid: u.uuid,
+			})
 			.collect();
 
 		// Build new user map from response
@@ -468,10 +470,8 @@ impl Panel {
 			stats.add_user(traffic.user_id, traffic.n as i64);
 		}
 
-		let raw_data = serde_json::to_vec(&traffic_list)
-			.map_err(|e| eyre::eyre!("Failed to serialize traffic data: {}", e))?;
-		let raw_stats =
-			serde_json::to_vec(&stats).map_err(|e| eyre::eyre!("Failed to serialize traffic stats: {}", e))?;
+		let raw_data = serde_json::to_vec(&traffic_list).map_err(|e| eyre::eyre!("Failed to serialize traffic data: {}", e))?;
+		let raw_stats = serde_json::to_vec(&stats).map_err(|e| eyre::eyre!("Failed to serialize traffic stats: {}", e))?;
 
 		let mut client = self.get_client().await?;
 
@@ -503,7 +503,7 @@ impl Panel {
 		let mut client = self.get_client().await?;
 
 		let request = tonic::Request::new(UnregisterRequest {
-			node_type: GrpcNodeType::Tuic as i32,
+			node_type:   GrpcNodeType::Tuic as i32,
 			register_id: register_id.to_string(),
 		});
 
@@ -617,9 +617,9 @@ impl PanelService for Panel {
 
 			// Persist state to file with all config info
 			let state = PanelState {
-				register_id: Some(register_id),
-				node_id: Some(node_id),
-				server_port: Some(server_port),
+				register_id:        Some(register_id),
+				node_id:            Some(node_id),
+				server_port:        Some(server_port),
 				zero_rtt_handshake: Some(zero_rtt_handshake),
 			};
 			self.save_state(&state)?;

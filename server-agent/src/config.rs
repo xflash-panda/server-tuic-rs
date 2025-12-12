@@ -512,13 +512,7 @@ mod tests {
 		assert!(result.is_err());
 
 		// Test non-existent configuration files - should fail when trying to parse
-		let result = Cli::try_parse_from(vec![
-			"test_binary",
-			"--ext_conf_file",
-			"non_existent.toml",
-			"--node",
-			"1",
-		]);
+		let result = Cli::try_parse_from(vec!["test_binary", "--ext_conf_file", "non_existent.toml", "--node", "1"]);
 		// This will succeed at parsing CLI level, but fail when actually loading the
 		// file
 		if let Ok(cli) = result {
