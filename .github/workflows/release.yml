@@ -25,36 +25,24 @@ jobs:
           # Linux x86_64
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            cross: false
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-            cross: true
 
           # Linux aarch64
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            cross: true
+            os: ubuntu-24.04-arm
           - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
-            cross: true
-
-          # Linux ARM
-          - target: armv7-unknown-linux-gnueabihf
-            os: ubuntu-latest
-            cross: true
+            os: ubuntu-24.04-arm
 
           # macOS
           - target: x86_64-apple-darwin
-            os: macos-latest
-            cross: false
+            os: macos-13
           - target: aarch64-apple-darwin
             os: macos-latest
-            cross: false
 
           # Windows
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            cross: false
 
     steps:
       - uses: actions/checkout@v6
@@ -63,6 +51,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Install musl tools (Linux)
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Install protobuf compiler (Linux)
         if: runner.os == 'Linux'
@@ -76,20 +68,11 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install protoc
 
-      - name: Install cross
-        if: matrix.cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
 
-      - name: Build (cross)
-        if: matrix.cross
-        run: cross build --release -p server-agent --target ${{ matrix.target }}
-
-      - name: Build (cargo)
-        if: '!matrix.cross'
+      - name: Build
         run: cargo build --release -p server-agent --target ${{ matrix.target }}
 
       - name: Prepare artifact (Unix)
