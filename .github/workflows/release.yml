@@ -37,8 +37,6 @@ jobs:
             cross: true
 
           # macOS
-          - target: x86_64-apple-darwin
-            os: macos-15-large
           - target: aarch64-apple-darwin
             os: macos-latest
 
