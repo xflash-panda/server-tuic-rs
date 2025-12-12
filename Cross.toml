@@ -1,6 +1,6 @@
 [build]
 pre-build = [
-    "apt-get update && apt-get install -y protobuf-compiler"
+    "curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v29.2/protoc-29.2-linux-x86_64.zip && unzip protoc-29.2-linux-x86_64.zip -d /usr/local && rm protoc-29.2-linux-x86_64.zip"
 ]
 
 [build.env]
