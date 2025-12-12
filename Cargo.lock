@@ -1967,7 +1967,7 @@ dependencies = [
  "serde",
  "serde_json",
  "server-r-agent-proto",
- "server-r-client 0.1.5",
+ "server-r-client 0.1.6",
  "socket2 0.6.1",
  "tempfile",
  "thiserror 2.0.17",
@@ -2009,8 +2009,8 @@ dependencies = [
 
 [[package]]
 name = "server-r-client"
-version = "0.1.5"
-source = "git+https://github.com/xflash-panda/server-r-client?tag=v0.1.5#0bb012cbcb9eba47f7dc402e3c2a34d77f365405"
+version = "0.1.6"
+source = "git+https://github.com/xflash-panda/server-r-client?tag=v0.1.6#fdc16695c179266a814974a7f640b07844b518df"
 dependencies = [
  "reqwest",
  "serde",
