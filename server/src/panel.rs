@@ -15,11 +15,11 @@ const STATE_FILE: &str = "state.json";
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct PanelState {
 	/// Registration ID obtained from API
-	register_id: Option<String>,
+	register_id:        Option<String>,
 	/// Node ID from API config
-	node_id: Option<i64>,
+	node_id:            Option<i64>,
 	/// Server port from API config
-	server_port: Option<u16>,
+	server_port:        Option<u16>,
 	/// Zero RTT handshake setting from API config
 	zero_rtt_handshake: Option<bool>,
 }
@@ -410,9 +410,9 @@ impl PanelService for Panel {
 
 			// Persist state to file with all config info
 			let state = PanelState {
-				register_id: Some(register_id),
-				node_id: Some(node_id),
-				server_port: Some(server_port),
+				register_id:        Some(register_id),
+				node_id:            Some(node_id),
+				server_port:        Some(server_port),
 				zero_rtt_handshake: Some(zero_rtt_handshake),
 			};
 			self.save_state(&state)?;
