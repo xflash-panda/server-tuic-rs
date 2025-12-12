@@ -97,7 +97,7 @@ tuic-server --init
 | `--key_file <PATH>` | TLS 私钥文件路径 | `/root/.cert/server.key` |
 | `--log_mode <LEVEL>` | 日志级别 (trace/debug/info/warn/error/off) | `info` |
 | `--fetch_users_interval <SECS>` | 用户列表刷新间隔 (秒) | `60` |
-| `--report_traffics_interval <SECS>` | 流量上报间隔 (秒) | `80` |
+| `--report_traffics_interval <SECS>` | 流量上报间隔 (秒) | `100` |
 | `--heartbeat_interval <SECS>` | 心跳间隔 (秒) | `180` |
 | `--data_dir <PATH>` | 数据目录路径 | `/var/lib/tuic-node` |
 | `--init` | 生成示例配置文件 | - |

@@ -75,7 +75,7 @@ pub struct Cli {
 	pub fetch_users_interval: u64,
 
 	/// API request cycle for reporting traffic stats (in seconds)
-	#[arg(long = "report_traffics_interval", value_name = "SECONDS", default_value = "80")]
+	#[arg(long = "report_traffics_interval", value_name = "SECONDS", default_value = "100")]
 	pub report_traffics_interval: u64,
 
 	/// API request cycle for heartbeat (in seconds)
