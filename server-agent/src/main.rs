@@ -13,6 +13,15 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+	#[cfg(feature = "aws-lc-rs")]
+	rustls::crypto::aws_lc_rs::default_provider()
+		.install_default()
+		.expect("Failed to install rustls crypto provider");
+
+	#[cfg(feature = "ring")]
+	rustls::crypto::ring::default_provider()
+		.install_default()
+		.expect("Failed to install rustls crypto provider");
 	let cli = Cli::parse();
 	let cfg = match parse_config(cli).await {
 		Ok(cfg) => cfg,
