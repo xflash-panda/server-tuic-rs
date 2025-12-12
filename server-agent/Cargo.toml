@@ -30,7 +30,7 @@ moka = { version = "0.12", features = ["future"] }
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "log"] }
 
 # Core
-tuic = { package = "core", path = "../core", default-features = false, features = ["async_marshal", "marshal", "model"] }
+tuic = { package = "tuic-core", path = "../core", default-features = false, features = ["async_marshal", "marshal", "model"] }
 register-count = { version = "0.1.0", default-features = false, features = ["std"] }
 
 # Panel gRPC Client

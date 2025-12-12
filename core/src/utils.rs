@@ -78,7 +78,7 @@ impl FromStr for CongestionControl {
 /// # Examples
 ///
 /// ```
-/// use core::StackPrefer;
+/// use tuic_core::StackPrefer;
 ///
 /// // Serializes to "v4first"
 /// let prefer = StackPrefer::V4first;
