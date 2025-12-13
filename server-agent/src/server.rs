@@ -34,6 +34,9 @@ impl Server {
 			.with_no_client_auth()
 			.with_cert_resolver(cert_resolver);
 
+		// Set ALPN protocols - required for Clash Meta and other clients
+		crypto.alpn_protocols = vec![b"h3".to_vec()];
+
 		// TODO only set when 0-RTT enabled
 		crypto.max_early_data_size = u32::MAX;
 		crypto.send_half_rtt_data = ctx.cfg.zero_rtt_handshake;
