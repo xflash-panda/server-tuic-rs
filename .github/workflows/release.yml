@@ -70,7 +70,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: ${{ matrix.target }}-${{ matrix.cross && 'cross' || 'cargo' }}
 
       - name: Build (cross)
         if: matrix.cross
