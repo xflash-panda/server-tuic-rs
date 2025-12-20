@@ -69,6 +69,8 @@ pub struct PanelConfig {
 	pub heartbeat_interval:       u64,
 	/// Data directory for persisting state and other data
 	pub data_dir:                 PathBuf,
+	/// Request timeout in seconds (default: 30)
+	pub request_timeout:          u64,
 }
 
 /// User information from server
@@ -167,10 +169,16 @@ impl Panel {
 	/// Connect to the gRPC server
 	async fn connect(&self) -> eyre::Result<AgentClient<Channel>> {
 		let endpoint = format!("http://{}:{}", self.config.server_host, self.config.server_port);
-		info!("Connecting to gRPC server at {}", endpoint);
+		let timeout = Duration::from_secs(self.config.request_timeout);
+		info!(
+			"Connecting to gRPC server at {} (timeout: {}s)",
+			endpoint, self.config.request_timeout
+		);
 
 		let channel = Channel::from_shared(endpoint.clone())
 			.map_err(|e| eyre::eyre!("Invalid endpoint: {}", e))?
+			.connect_timeout(timeout)
+			.timeout(timeout)
 			.connect()
 			.await
 			.map_err(|e| eyre::eyre!("Failed to connect to gRPC server {}: {}", endpoint, e))?;

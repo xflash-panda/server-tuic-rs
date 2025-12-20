@@ -85,6 +85,10 @@ pub struct Cli {
 	/// Data directory for persisting state and other data
 	#[arg(long = "data_dir", value_name = "PATH", default_value = "/var/lib/tuic-agent-node")]
 	pub data_dir: PathBuf,
+
+	/// gRPC request timeout (in seconds)
+	#[arg(long = "request_timeout", value_name = "SECONDS", default_value = "30")]
+	pub request_timeout: u64,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -445,6 +449,7 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 		report_traffics_interval: cli.report_traffics_interval,
 		heartbeat_interval:       cli.heartbeat_interval,
 		data_dir:                 cli.data_dir,
+		request_timeout:          cli.request_timeout,
 	});
 
 	Ok(config)
