@@ -87,7 +87,7 @@ pub struct Cli {
 	pub data_dir: PathBuf,
 
 	/// gRPC request timeout (in seconds)
-	#[arg(long = "request_timeout", value_name = "SECONDS", default_value = "30")]
+	#[arg(long = "timeout", value_name = "SECONDS", default_value = "15")]
 	pub request_timeout: u64,
 }
 
