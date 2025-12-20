@@ -676,9 +676,17 @@ impl PanelService for Panel {
 		// Periodic tasks loop
 		loop {
 			tokio::select! {
-				_ = shutdown_rx.recv() => {
-					info!("Received shutdown signal, stopping periodic tasks");
-					break;
+				result = shutdown_rx.recv() => {
+					match result {
+						Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+							info!("Received shutdown signal, stopping periodic tasks");
+							break;
+						}
+						Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+							warn!("Shutdown receiver lagged by {} messages, continuing", n);
+							// Continue the loop, don't break
+						}
+					}
 				}
 				_ = fetch_timer.tick() => {
 					// Fetch users periodically
