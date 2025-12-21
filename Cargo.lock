@@ -2045,7 +2045,7 @@ dependencies = [
 
 [[package]]
 name = "server-agent"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -2265,7 +2265,7 @@ dependencies = [
 
 [[package]]
 name = "tests"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "aws-lc-rs",
  "eyre",
@@ -2774,7 +2774,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuic-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "bytes",
  "eyre",

@@ -458,10 +458,10 @@ impl Panel {
 		// Get traffic stats without resetting
 		let traffic_data = crate::stats::get_all_traffic(ctx).await;
 
-		// Filter out entries with no traffic
+		// Filter out entries with no traffic or no requests
 		let traffic_list: Vec<UserTraffic> = traffic_data
 			.into_iter()
-			.filter(|(_, tx, rx, _)| *tx > 0 || *rx > 0)
+			.filter(|(_, tx, rx, conn)| (*tx > 0 || *rx > 0) && *conn > 0)
 			.map(|(uid, tx, rx, conn)| UserTraffic::with_count(uid, tx as u64, rx as u64, conn as u64))
 			.collect();
 

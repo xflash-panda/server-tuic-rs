@@ -171,8 +171,6 @@ impl Connection {
 	pub async fn handle_connect(&self, mut conn: Connect) {
 		let target_addr = conn.addr().to_string();
 
-		stats::req_incr(&self.ctx, self.auth.get_uid()).await;
-
 		info!(
 			"[{id:#010x}] [{addr}] [{user}] [TCP] {target_addr} ",
 			id = self.id(),
@@ -228,9 +226,10 @@ impl Connection {
 			}
 			_ = stream.shutdown().await;
 
-			// Record traffic stats using UID
+			// Record traffic and request stats using UID
 			if self.auth.is_authenticated() {
 				let uid = self.auth.get_uid();
+				stats::req_incr(&self.ctx, uid).await;
 				stats::traffic_tx(&self.ctx, uid, tx).await;
 				stats::traffic_rx(&self.ctx, uid, rx).await;
 			}
@@ -312,8 +311,6 @@ impl Connection {
 		let pkt_id = pkt.pkt_id();
 		let frag_id = pkt.frag_id();
 		let frag_total = pkt.frag_total();
-
-		stats::req_incr(&self.ctx, self.auth.get_uid()).await;
 
 		info!(
 			"[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] fragment \
@@ -435,9 +432,11 @@ impl Connection {
 				initial_addrs[0]
 			};
 
-			// Record traffic stats for UDP outbound
+			// Record traffic and request stats for UDP outbound
 			if self.auth.is_authenticated() {
-				stats::traffic_tx(&self.ctx, self.auth.get_uid(), pkt.len()).await;
+				let uid = self.auth.get_uid();
+				stats::req_incr(&self.ctx, uid).await;
+				stats::traffic_tx(&self.ctx, uid, pkt.len()).await;
 			}
 
 			if let Some(session) = session.upgrade() {
