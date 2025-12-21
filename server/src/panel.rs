@@ -448,10 +448,14 @@ impl PanelService for Panel {
 		let fetch_interval = Duration::from_secs(self.config.fetch_users_interval);
 		let heartbeat_interval = Duration::from_secs(self.config.heartbeat_interval);
 		let report_interval = Duration::from_secs(self.config.report_traffics_interval);
+		let task_timeout = Duration::from_secs(self.config.timeout);
 
 		info!(
-			"Starting periodic tasks (user fetch: {}s, heartbeat: {}s, report traffic: {}s)",
-			self.config.fetch_users_interval, self.config.heartbeat_interval, self.config.report_traffics_interval
+			"Starting periodic tasks (user fetch: {}s, heartbeat: {}s, report traffic: {}s, task timeout: {}s)",
+			self.config.fetch_users_interval,
+			self.config.heartbeat_interval,
+			self.config.report_traffics_interval,
+			self.config.timeout
 		);
 
 		let mut fetch_timer = tokio::time::interval(fetch_interval);
@@ -482,21 +486,39 @@ impl PanelService for Panel {
 					}
 				}
 				_ = fetch_timer.tick() => {
-					// Fetch users periodically
-					if let Err(e) = self.fetch_users().await {
-						error!("Periodic user fetch failed: {}", e);
+					// Fetch users periodically with timeout protection
+					match tokio::time::timeout(task_timeout, self.fetch_users()).await {
+						Ok(Ok(_)) => {}
+						Ok(Err(e)) => {
+							error!("Periodic user fetch failed: {}", e);
+						}
+						Err(_) => {
+							error!("Periodic user fetch timed out after {}s", task_timeout.as_secs());
+						}
 					}
 				}
 				_ = heartbeat_timer.tick() => {
-					// Send heartbeat periodically
-					if let Err(e) = self.send_heartbeat().await {
-						error!("Heartbeat failed: {}", e);
+					// Send heartbeat periodically with timeout protection
+					match tokio::time::timeout(task_timeout, self.send_heartbeat()).await {
+						Ok(Ok(_)) => {}
+						Ok(Err(e)) => {
+							error!("Heartbeat failed: {}", e);
+						}
+						Err(_) => {
+							error!("Heartbeat timed out after {}s", task_timeout.as_secs());
+						}
 					}
 				}
 				_ = report_timer.tick() => {
-					// Submit traffic stats periodically
-					if let Err(e) = self.submit_traffic(&ctx).await {
-						error!("Traffic submission failed: {}", e);
+					// Submit traffic stats periodically with timeout protection
+					match tokio::time::timeout(task_timeout, self.submit_traffic(&ctx)).await {
+						Ok(Ok(_)) => {}
+						Ok(Err(e)) => {
+							error!("Traffic submission failed: {}", e);
+						}
+						Err(_) => {
+							error!("Traffic submission timed out after {}s", task_timeout.as_secs());
+						}
 					}
 				}
 			}
