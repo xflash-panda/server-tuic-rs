@@ -673,7 +673,10 @@ impl PanelService for Panel {
 
 		info!(
 			"Starting periodic tasks (user fetch: {}s, heartbeat: {}s, report traffic: {}s, task timeout: {}s)",
-			self.config.fetch_users_interval, self.config.heartbeat_interval, self.config.report_traffics_interval, self.config.request_timeout
+			self.config.fetch_users_interval,
+			self.config.heartbeat_interval,
+			self.config.report_traffics_interval,
+			self.config.request_timeout
 		);
 
 		let mut fetch_timer = tokio::time::interval(fetch_interval);
