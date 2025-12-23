@@ -8,7 +8,7 @@ use arc_swap::ArcSwap;
 use quinn::{Connecting, Connection as QuinnConnection, VarInt};
 use register_count::Counter;
 use tokio::{sync::RwLock as AsyncRwLock, time};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 use tuic::quinn::{Authenticate, Connection as Model, side};
 
 use self::{authenticated::Authenticated, udp_session::UdpSession};
@@ -55,7 +55,7 @@ impl Connection {
 
 		match init.await {
 			Ok(conn) => {
-				info!(
+				debug!(
 					"[{id:#010x}] [{addr}] [{user}] connection established",
 					id = conn.id(),
 					user = conn.auth,
