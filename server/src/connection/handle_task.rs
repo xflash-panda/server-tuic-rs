@@ -10,7 +10,7 @@ use tokio::{
 	io::{AsyncReadExt, AsyncWriteExt},
 	net::{self, TcpSocket, TcpStream},
 };
-use tracing::{info, warn};
+use tracing::{debug, warn};
 use tuic::{
 	Address, is_private_ip,
 	quinn::{Authenticate, Connect, Packet},
@@ -159,7 +159,7 @@ impl Connection {
 	}
 
 	pub async fn handle_authenticate(&self, auth: Authenticate) {
-		info!(
+		debug!(
 			"[{id:#010x}] [{addr}] [{user}] [AUTH] {auth_uuid}",
 			id = self.id(),
 			addr = self.inner.remote_address(),
@@ -171,7 +171,7 @@ impl Connection {
 	pub async fn handle_connect(&self, mut conn: Connect) {
 		let target_addr = conn.addr().to_string();
 
-		info!(
+		debug!(
 			"[{id:#010x}] [{addr}] [{user}] [TCP] {target_addr} ",
 			id = self.id(),
 			addr = self.inner.remote_address(),
@@ -312,7 +312,7 @@ impl Connection {
 		let frag_id = pkt.frag_id();
 		let frag_total = pkt.frag_total();
 
-		info!(
+		debug!(
 			"[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] fragment \
 			 {frag_id}/{frag_total}",
 			id = self.id(),
@@ -340,7 +340,7 @@ impl Connection {
 		};
 
 		let process = async {
-			info!(
+			debug!(
 				"[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] to {src_addr}",
 				id = self.id(),
 				addr = self.inner.remote_address(),
@@ -406,7 +406,7 @@ impl Connection {
 					return Ok(());
 				} else {
 					// We don't support UDP via SOCKS5 yet; fall back to direct
-					info!(
+					debug!(
 						"[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] outbound '{outbound_name}' allows UDP but \
 						 UDP via SOCKS5 not supported; using direct as you configured",
 						id = self.id(),
@@ -458,7 +458,7 @@ impl Connection {
 	}
 
 	pub async fn handle_dissociate(&self, assoc_id: u16) {
-		info!(
+		debug!(
 			"[{id:#010x}] [{addr}] [{user}] [UDP-DROP] [{assoc_id:#06x}]",
 			id = self.id(),
 			addr = self.inner.remote_address(),
@@ -473,7 +473,7 @@ impl Connection {
 	}
 
 	pub async fn handle_heartbeat(&self) {
-		info!(
+		debug!(
 			"[{id:#010x}] [{addr}] [{user}] [HB]",
 			id = self.id(),
 			addr = self.inner.remote_address(),
@@ -484,7 +484,7 @@ impl Connection {
 	pub async fn relay_packet(self, pkt: Bytes, addr: Address, assoc_id: u16) -> eyre::Result<()> {
 		let addr_display = addr.to_string();
 
-		info!(
+		debug!(
 			"[{id:#010x}] [{addr}] [{user}] [UDP-IN] [{assoc_id:#06x}] [to-{mode}] from {src_addr}",
 			id = self.id(),
 			addr = self.inner.remote_address(),
