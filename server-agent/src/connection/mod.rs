@@ -8,7 +8,7 @@ use arc_swap::ArcSwap;
 use quinn::{Connecting, Connection as QuinnConnection, VarInt};
 use register_count::Counter;
 use tokio::{sync::RwLock as AsyncRwLock, time};
-use tracing::{debug, warn};
+use tracing::debug;
 use tuic::quinn::{Authenticate, Connection as Model, side};
 
 use self::{authenticated::Authenticated, udp_session::UdpSession};
@@ -86,7 +86,7 @@ impl Connection {
 						Err(err) if err.is_trivial() => {
 							debug!("[{id:#010x}] [{addr}] [{user}] {err}", id = conn.id(), user = conn.auth,);
 						}
-						Err(err) => warn!(
+						Err(err) => debug!(
 							"[{id:#010x}] [{addr}] [{user}] connection error: {err}",
 							id = conn.id(),
 							user = conn.auth,
@@ -98,7 +98,7 @@ impl Connection {
 				debug!("[{id:#010x}] [{addr}] [unauthenticated] {err}", id = u32::MAX,);
 			}
 			Err(err) => {
-				warn!("[{id:#010x}] [{addr}] [unauthenticated] {err}", id = u32::MAX,)
+				debug!("[{id:#010x}] [{addr}] [unauthenticated] {err}", id = u32::MAX,)
 			}
 		}
 	}
@@ -134,7 +134,7 @@ impl Connection {
 		time::sleep(timeout).await;
 
 		if self.auth.get().is_none() {
-			warn!(
+			debug!(
 				"[{id:#010x}] [{addr}] [unauthenticated] [authenticate] timeout",
 				id = self.id(),
 				addr = self.inner.remote_address(),

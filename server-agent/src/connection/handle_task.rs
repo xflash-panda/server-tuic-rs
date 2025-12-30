@@ -10,7 +10,7 @@ use tokio::{
 	io::{AsyncReadExt, AsyncWriteExt},
 	net::{self, TcpSocket, TcpStream},
 };
-use tracing::{debug, warn};
+use tracing::debug;
 use tuic::{
 	Address, is_private_ip,
 	quinn::{Authenticate, Connect, Packet},
@@ -192,7 +192,7 @@ impl Connection {
 			let (outbound_name, hijack, drop) = self.decide_acl_for_addrs(&initial_addrs, port, true, domain);
 
 			if drop {
-				warn!(
+				debug!(
 					"[{id:#010x}] [{addr}] [{user}] [TCP] {target_addr} blocked by ACL",
 					id = self.id(),
 					addr = self.inner.remote_address(),
@@ -242,7 +242,7 @@ impl Connection {
 
 		match process.await {
 			Ok(()) => {}
-			Err(err) => warn!(
+			Err(err) => debug!(
 				"[{id:#010x}] [{addr}] [{user}] [TCP] {target_addr}: {err}",
 				id = self.id(),
 				addr = self.inner.remote_address(),
@@ -327,7 +327,7 @@ impl Connection {
 			Ok(None) => return,
 			Ok(Some(res)) => res,
 			Err(err) => {
-				warn!(
+				debug!(
 					"[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] fragment \
 					 {frag_id}/{frag_total}: {err}",
 					id = self.id(),
@@ -376,7 +376,7 @@ impl Connection {
 			let (outbound_name, hijack, should_drop) = self.decide_acl_for_addrs(&initial_addrs, addr.port(), false, domain);
 			if should_drop {
 				// Silently drop the packet as per ACL
-				warn!(
+				debug!(
 					"[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] to {src_addr} \
 					 blocked by ACL",
 					id = self.id(),
@@ -394,7 +394,7 @@ impl Connection {
 				// allowed
 				let allow_udp = outbound.allow_udp.unwrap_or(false);
 				if !allow_udp {
-					warn!(
+					debug!(
 						"[{id:#010x}] [{addr}] [{user}] [UDP-OUT-SOCKS5] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] to \
 						 {src_addr} blocked by ACL",
 						id = self.id(),
@@ -416,7 +416,7 @@ impl Connection {
 				}
 			} else if !outbound.kind.eq_ignore_ascii_case("direct") {
 				// Outbound other than direct is not supported for UDP yet; proceed as direct
-				warn!(
+				debug!(
 					"[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] outbound '{outbound_name}' not supported; \
 					 using direct",
 					id = self.id(),
@@ -447,7 +447,7 @@ impl Connection {
 		};
 
 		if let Err(err) = process.await {
-			warn!(
+			debug!(
 				"[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] to {src_addr}: {err}",
 				id = self.id(),
 				addr = self.inner.remote_address(),
@@ -504,7 +504,7 @@ impl Connection {
 		};
 
 		if let Err(err) = res {
-			warn!(
+			debug!(
 				"[{id:#010x}] [{addr}] [{user}] [UDP-IN] [{assoc_id:#06x}] [to-{mode}] from {src_addr}: {err}",
 				id = self.id(),
 				addr = self.inner.remote_address(),
