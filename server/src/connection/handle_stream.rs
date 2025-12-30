@@ -4,7 +4,7 @@ use bytes::Bytes;
 use quinn::{RecvStream, SendStream, VarInt};
 use register_count::Register;
 use tokio::time;
-use tracing::{debug, warn};
+use tracing::debug;
 use tuic::quinn::Task;
 
 use super::Connection;
@@ -68,7 +68,7 @@ impl Connection {
 			Ok(Task::Dissociate(assoc_id)) => self.handle_dissociate(assoc_id).await,
 			Ok(_) => unreachable!(), // already filtered in `tuic_quinn`
 			Err(err) => {
-				warn!(
+				debug!(
 					"[{id:#010x}] [{addr}] [{user}] handling incoming unidirectional stream error: {err}",
 					id = self.id(),
 					addr = self.inner.remote_address(),
@@ -125,7 +125,7 @@ impl Connection {
 			Ok(Task::Connect(conn)) => self.handle_connect(conn).await,
 			Ok(_) => unreachable!(), // already filtered in `tuic_quinn`
 			Err(err) => {
-				warn!(
+				debug!(
 					"[{id:#010x}] [{addr}] [{user}] handling incoming bidirectional stream error: {err}",
 					id = self.id(),
 					addr = self.inner.remote_address(),
@@ -170,7 +170,7 @@ impl Connection {
 			Ok(Task::Heartbeat) => self.handle_heartbeat().await,
 			Ok(_) => unreachable!(),
 			Err(err) => {
-				warn!(
+				debug!(
 					"[{id:#010x}] [{addr}] [{user}] handling incoming datagram error: {err}",
 					id = self.id(),
 					addr = self.inner.remote_address(),

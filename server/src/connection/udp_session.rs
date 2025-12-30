@@ -10,7 +10,7 @@ use tokio::{
 	net::UdpSocket,
 	sync::{RwLock as AsyncRwLock, oneshot},
 };
-use tracing::warn;
+use tracing::debug;
 use tuic::Address;
 
 use super::Connection;
@@ -89,7 +89,7 @@ impl UdpSession {
 					// Avoid client didn't send `UDP-DROP` properly
 					_ = timeout.tick() => {
 						session_listening.close().await;
-						warn!(
+						debug!(
 							"[{id:#010x}] [{addr}] [{user}] [packet] [{assoc_id:#06x}] UDP session timeout",
 							id = session_listening.conn.id(),
 							addr = session_listening.conn.inner.remote_address(),
@@ -104,7 +104,7 @@ impl UdpSession {
 				let (pkt, addr) = match next {
 					Ok(v) => v,
 					Err(err) => {
-						warn!(
+						debug!(
 							"[{id:#010x}] [{addr}] [{user}] [packet] [{assoc_id:#06x}] outbound listening error: {err}",
 							id = session_listening.conn.id(),
 							addr = session_listening.conn.inner.remote_address(),
