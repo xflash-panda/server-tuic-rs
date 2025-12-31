@@ -345,8 +345,8 @@ impl PanelService for Panel {
 						self.delete_state();
 					}
 					Err(e) => {
-						warn!("Failed to verify register_id: {}, will re-register", e);
-						self.delete_state();
+						// Network error - don't delete state, exit and retry on next startup
+						return Err(eyre::eyre!("Failed to verify register_id: {}", e));
 					}
 				}
 			}
