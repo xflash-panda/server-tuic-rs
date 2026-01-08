@@ -349,14 +349,11 @@ impl Panel {
 	/// Fetch users from gRPC server and update local storage
 	/// Returns the total number of users after update
 	async fn fetch_users(&self) -> eyre::Result<usize> {
-		let register_id = self.register_id.read().await.clone();
-		let register_id = register_id.ok_or_else(|| eyre::eyre!("No register_id available"))?;
-
 		let mut client = self.get_client().await?;
 
 		let request = tonic::Request::new(UsersRequest {
-			node_type:   GrpcNodeType::Tuic as i32,
-			register_id: register_id.clone(),
+			node_type: GrpcNodeType::Tuic as i32,
+			node_id:   self.config.node_id as i32,
 		});
 
 		let response = client

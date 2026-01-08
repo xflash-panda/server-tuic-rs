@@ -552,7 +552,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -953,7 +953,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.1",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -1625,7 +1625,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.1",
+ "socket2 0.5.10",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
@@ -1663,9 +1663,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.1",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1857,7 +1857,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2045,7 +2045,7 @@ dependencies = [
 
 [[package]]
 name = "server-agent"
-version = "0.1.8"
+version = "0.1.10"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -2073,7 +2073,7 @@ dependencies = [
  "serde",
  "serde_json",
  "server-r-agent-proto",
- "server-r-client 0.1.6 (git+https://github.com/xflash-panda/server-r-client?tag=v0.1.6)",
+ "server-r-client 0.1.7",
  "socket2 0.6.1",
  "tempfile",
  "thiserror 2.0.17",
@@ -2092,7 +2092,7 @@ dependencies = [
 [[package]]
 name = "server-r-agent-proto"
 version = "0.1.1"
-source = "git+https://github.com/xflash-panda/server-r-agent-proto.git?tag=v0.1.1#056e69f2d1f2e40a2e6b20dff3a46616b27a3ded"
+source = "git+https://github.com/xflash-panda/server-r-agent-proto.git?tag=v0.1.2#61b552dc5312f4f206ae5eb18bdc013240716e83"
 dependencies = [
  "prost",
  "tonic",
@@ -2103,7 +2103,7 @@ dependencies = [
 [[package]]
 name = "server-r-client"
 version = "0.1.6"
-source = "git+https://github.com/xflash-panda/server-r-client?tag=v0.1.6#fdc16695c179266a814974a7f640b07844b518df"
+source = "git+https://github.com/xflash-panda/server-r-client?branch=dev#fdc16695c179266a814974a7f640b07844b518df"
 dependencies = [
  "reqwest",
  "serde",
@@ -2116,8 +2116,8 @@ dependencies = [
 
 [[package]]
 name = "server-r-client"
-version = "0.1.6"
-source = "git+https://github.com/xflash-panda/server-r-client?branch=dev#fdc16695c179266a814974a7f640b07844b518df"
+version = "0.1.7"
+source = "git+https://github.com/xflash-panda/server-r-client?tag=v0.1.7#ad66648e37f4f8dd766456d00aaf745b62c23080"
 dependencies = [
  "reqwest",
  "serde",
@@ -2260,12 +2260,12 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
 name = "tests"
-version = "0.1.8"
+version = "0.1.10"
 dependencies = [
  "aws-lc-rs",
  "eyre",
@@ -2275,7 +2275,7 @@ dependencies = [
  "rustls",
  "serial_test",
  "server-agent",
- "server-r-client 0.1.6 (git+https://github.com/xflash-panda/server-r-client?branch=dev)",
+ "server-r-client 0.1.6",
  "tokio",
  "tracing",
  "tracing-test",
@@ -2412,9 +2412,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.48.0"
+version = "1.49.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff360e02eab121e0bc37a2d3b4d4dc622e6eda3a8e5253d5435ecf5bd4c68408"
+checksum = "72a2903cd7736441aac9df9d7688bd0ce48edccaadf181c3b90be801e81d3d86"
 dependencies = [
  "bytes",
  "libc",
@@ -2774,7 +2774,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuic-core"
-version = "0.1.8"
+version = "0.1.10"
 dependencies = [
  "bytes",
  "eyre",
