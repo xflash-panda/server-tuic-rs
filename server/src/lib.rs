@@ -6,8 +6,11 @@ use std::{
 	sync::{Arc, atomic::AtomicUsize},
 };
 
-use tokio::sync::{RwLock, broadcast};
+use moka::future::Cache;
+use quinn::Connection as QuinnConnection;
+use tokio::sync::{RwLock, RwLock as AsyncRwLock, broadcast};
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 pub mod acl;
 pub mod config;
@@ -26,12 +29,54 @@ pub use panel::{OptionalPanel, Panel, PanelService};
 /// Traffic statistics tuple: (tx_bytes, rx_bytes, connection_count)
 pub type TrafficStats = (AtomicUsize, AtomicUsize, AtomicUsize);
 
+/// Per-user connection map: connection_id -> QuinnConnection
+pub type UserConnections = Arc<AsyncRwLock<HashMap<usize, QuinnConnection>>>;
+
+/// Online clients registry: UUID -> UserConnections
+/// Used to track and manage active connections per user
+pub type OnlineClients = Cache<Uuid, UserConnections>;
+
+/// Error code for kicked clients
+const KICK_ERROR_CODE: quinn::VarInt = quinn::VarInt::from_u32(6002);
+
 pub struct AppContext {
-	pub cfg:           Config,
+	pub cfg:            Config,
 	/// Traffic statistics per user, dynamically initialized on first access
-	pub traffic_stats: RwLock<HashMap<i64, TrafficStats>>,
-	pub panel_service: Arc<OptionalPanel>,
-	pub shutdown_tx:   broadcast::Sender<()>,
+	pub traffic_stats:  RwLock<HashMap<i64, TrafficStats>>,
+	pub panel_service:  Arc<OptionalPanel>,
+	pub shutdown_tx:    broadcast::Sender<()>,
+	/// Online clients registry for connection management
+	pub online_clients: OnlineClients,
+}
+
+impl AppContext {
+	/// Kick users by closing all their active connections
+	/// This should be called when users are removed from the panel
+	pub async fn kick_users(&self, uuids: &[Uuid]) {
+		use tracing::debug;
+
+		for uuid in uuids {
+			if let Some(user_conns) = self.online_clients.get(uuid).await {
+				let conns = user_conns.read().await;
+				let kicked_count = conns.len();
+
+				// Close all connections for this user
+				for (conn_id, conn) in conns.iter() {
+					conn.close(KICK_ERROR_CODE, b"User removed");
+					debug!("[{id:#010x}] [{uuid}] kicked connection", id = conn_id,);
+				}
+
+				drop(conns); // Release lock before removing from cache
+
+				// Remove the user from online clients cache
+				self.online_clients.remove(uuid).await;
+
+				if kicked_count > 0 {
+					info!("Kicked {} connection(s) for removed user {}", kicked_count, uuid);
+				}
+			}
+		}
+	}
 }
 
 /// Run the TUIC server with the given configuration
@@ -89,11 +134,15 @@ async fn run_inner(panel_service: Arc<OptionalPanel>, cfg: Config) -> eyre::Resu
 	let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
 	// Traffic stats are initialized dynamically on first access
+	// Online clients cache with no TTL (connections are manually managed)
+	let online_clients: OnlineClients = Cache::builder().build();
+
 	let ctx = Arc::new(AppContext {
 		traffic_stats: RwLock::new(HashMap::new()),
 		cfg,
 		panel_service: panel_service.clone(),
 		shutdown_tx: shutdown_tx.clone(),
+		online_clients,
 	});
 
 	// Spawn panel service run task

@@ -10,9 +10,10 @@ use register_count::Counter;
 use tokio::{sync::RwLock as AsyncRwLock, time};
 use tracing::debug;
 use tuic::quinn::{Authenticate, Connection as Model, side};
+use uuid::Uuid;
 
 use self::{authenticated::Authenticated, udp_session::UdpSession};
-use crate::{AppContext, error::Error, utils::UdpRelayMode};
+use crate::{AppContext, UserConnections, error::Error, utils::UdpRelayMode};
 
 mod authenticated;
 mod handle_stream;
@@ -93,6 +94,9 @@ impl Connection {
 						),
 					}
 				}
+
+				// Unregister connection from online clients when closed
+				conn.unregister_client().await;
 			}
 			Err(err) if err.is_trivial() => {
 				debug!("[{id:#010x}] [{addr}] [unauthenticated] {err}", id = u32::MAX,);
@@ -124,9 +128,49 @@ impl Connection {
 		} else if let Some(uid) = self.ctx.panel_service.validate_user(&auth.uuid()).await {
 			// UUID exists in panel - authentication successful
 			self.auth.set(auth.uuid(), uid).await;
+			// Register this connection in the online clients registry
+			self.register_client(auth.uuid()).await;
 			Ok(())
 		} else {
 			Err(Error::AuthFailed(auth.uuid()))
+		}
+	}
+
+	/// Register this connection in the online clients registry
+	async fn register_client(&self, uuid: Uuid) {
+		let conn_id = self.id() as usize;
+		let conn = self.inner.clone();
+
+		// Get or create the per-user connection map
+		let user_conns: UserConnections = self
+			.ctx
+			.online_clients
+			.get_with(uuid, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
+			.await;
+
+		// Add this connection to the user's map
+		user_conns.write().await.insert(conn_id, conn);
+
+		debug!("[{id:#010x}] [{uuid}] registered in online clients", id = conn_id,);
+	}
+
+	/// Unregister this connection from the online clients registry
+	async fn unregister_client(&self) {
+		if let Some(uuid) = self.auth.get() {
+			let conn_id = self.id() as usize;
+
+			if let Some(user_conns) = self.ctx.online_clients.get(&uuid).await {
+				let mut conns = user_conns.write().await;
+				conns.remove(&conn_id);
+
+				// If no more connections for this user, remove the user entry
+				if conns.is_empty() {
+					drop(conns); // Release lock before removing from outer cache
+					self.ctx.online_clients.remove(&uuid).await;
+				}
+
+				debug!("[{id:#010x}] [{uuid}] unregistered from online clients", id = conn_id,);
+			}
 		}
 	}
 
