@@ -348,7 +348,8 @@ impl Panel {
 
 	/// Fetch users from gRPC server and update local storage
 	/// Returns the total number of users after update
-	async fn fetch_users(&self) -> eyre::Result<usize> {
+	/// If ctx is provided, will kick removed users' connections
+	async fn fetch_users(&self, ctx: Option<&AppContext>) -> eyre::Result<usize> {
 		let mut client = self.get_client().await?;
 
 		let request = tonic::Request::new(UsersRequest {
@@ -414,6 +415,17 @@ impl Panel {
 		}
 
 		let count = user_map.len();
+
+		// Release the lock before kicking users to avoid potential deadlocks
+		drop(user_map);
+
+		// Kick removed users' connections if ctx is provided
+		if !removed.is_empty() {
+			if let Some(ctx) = ctx {
+				ctx.kick_users(&removed).await;
+			}
+		}
+
 		if !removed.is_empty() || !added.is_empty() {
 			info!(
 				"Users updated: {} added, {} removed, {} total",
@@ -646,8 +658,8 @@ impl PanelService for Panel {
 			self.save_state(&state)?;
 		}
 
-		// Fetch initial user data
-		self.fetch_users().await?;
+		// Fetch initial user data (no ctx needed since no connections exist yet)
+		self.fetch_users(None).await?;
 
 		// Send initial heartbeat
 		self.send_heartbeat().await?;
@@ -705,7 +717,8 @@ impl PanelService for Panel {
 				}
 				_ = fetch_timer.tick() => {
 					// Fetch users periodically with timeout protection
-					match tokio::time::timeout(task_timeout, self.fetch_users()).await {
+					// Pass ctx to kick removed users' connections
+					match tokio::time::timeout(task_timeout, self.fetch_users(Some(&ctx))).await {
 						Ok(Ok(_)) => {}
 						Ok(Err(e)) => {
 							error!("Periodic user fetch failed: {}", e);
