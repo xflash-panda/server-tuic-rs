@@ -63,10 +63,7 @@ impl AppContext {
 				// Close all connections for this user
 				for (conn_id, conn) in conns.iter() {
 					conn.close(KICK_ERROR_CODE, b"User removed");
-					debug!(
-						"[{id:#010x}] [{uuid}] kicked connection",
-						id = conn_id,
-					);
+					debug!("[{id:#010x}] [{uuid}] kicked connection", id = conn_id,);
 				}
 
 				drop(conns); // Release lock before removing from cache
@@ -75,10 +72,7 @@ impl AppContext {
 				self.online_clients.remove(uuid).await;
 
 				if kicked_count > 0 {
-					info!(
-						"Kicked {} connection(s) for removed user {}",
-						kicked_count, uuid
-					);
+					info!("Kicked {} connection(s) for removed user {}", kicked_count, uuid);
 				}
 			}
 		}

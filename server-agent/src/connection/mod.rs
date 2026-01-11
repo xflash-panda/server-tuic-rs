@@ -151,10 +151,7 @@ impl Connection {
 		// Add this connection to the user's map
 		user_conns.write().await.insert(conn_id, conn);
 
-		debug!(
-			"[{id:#010x}] [{uuid}] registered in online clients",
-			id = conn_id,
-		);
+		debug!("[{id:#010x}] [{uuid}] registered in online clients", id = conn_id,);
 	}
 
 	/// Unregister this connection from the online clients registry
@@ -172,10 +169,7 @@ impl Connection {
 					self.ctx.online_clients.remove(&uuid).await;
 				}
 
-				debug!(
-					"[{id:#010x}] [{uuid}] unregistered from online clients",
-					id = conn_id,
-				);
+				debug!("[{id:#010x}] [{uuid}] unregistered from online clients", id = conn_id,);
 			}
 		}
 	}
