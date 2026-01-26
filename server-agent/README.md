@@ -11,7 +11,6 @@
 - [安装](#安装)
 - [使用方法](#使用方法)
 - [配置说明](#配置说明)
-- [ACL 规则](#acl-规则)
 - [出站配置](#出站配置)
 - [控制面板集成](#控制面板集成)
 - [TLS 证书](#tls-证书)
@@ -26,7 +25,6 @@
 本项目 fork 自原始 TUIC 项目，增加了以下增强功能：
 - 控制面板 API 集成，支持动态用户管理
 - 实时流量统计与上报
-- 灵活的 ACL 规则系统
 - 多种出站代理模式
 - TLS 证书热重载
 
@@ -37,7 +35,6 @@
 - **0-RTT 代理**: 基于 QUIC 协议，最小化连接延迟
 - **完全多路复用**: 单连接承载多个流
 - **控制面板集成**: 动态获取用户列表、上报流量、心跳检测
-- **灵活 ACL**: 支持域名、IP、CIDR、端口等多种匹配规则
 - **多出站模式**: 直连、SOCKS5 代理
 - **拥塞控制**: 支持 BBR、CUBIC、NewReno 算法
 - **流量统计**: 实时跟踪每用户的发送/接收字节数和连接数
@@ -83,6 +80,7 @@ tuic-server --api https://api.example.com --token YOUR_TOKEN --node 1 \
 
 # 生成示例配置文件
 tuic-server --init
+# 生成 config.toml.example 和 acl.yaml.example
 ```
 
 ### 命令行参数
@@ -100,7 +98,8 @@ tuic-server --init
 | `--report_traffics_interval <SECS>` | 流量上报间隔 (秒) | `100` |
 | `--heartbeat_interval <SECS>` | 心跳间隔 (秒) | `180` |
 | `--data_dir <PATH>` | 数据目录路径 | `/var/lib/tuic-node` |
-| `--init` | 生成示例配置文件 | - |
+| `--acl_conf_file <PATH>` | ACL 配置文件路径 (YAML) | - |
+| `--init` | 生成示例配置文件 (.example 后缀) | - |
 
 ---
 
@@ -153,88 +152,108 @@ drop_private = true            # 禁止连接到私有地址
 
 ---
 
-## ACL 规则
+## ACL 配置
 
-ACL (访问控制列表) 支持两种配置格式：
+ACL (Access Control List) 提供基于规则的流量路由功能，支持 GeoIP、GeoSite、域名匹配等高级特性。
 
-### 格式一：表数组格式
+### 启用 ACL
 
-```toml
-[[acl]]
-addr = "127.0.0.1"             # 地址
-ports = "udp/53"               # 端口
-outbound = "default"           # 出站规则
-hijack = "1.1.1.1"             # 劫持地址 (可选)
-
-[[acl]]
-addr = "localhost"
-outbound = "drop"
-
-[[acl]]
-addr = "private"               # 匹配所有私有地址
-outbound = "drop"
+```bash
+# 使用 ACL 配置文件运行
+tuic-server --node 1 --acl-conf-file /path/to/acl.yaml
 ```
 
-### 格式二：多行字符串格式
+### ACL 配置格式
 
-```toml
-acl = '''
-# 格式: <outbound> <address> [<ports>] [<hijack>]
-direct localhost tcp/80,tcp/443,udp/443
-drop localhost
-drop private
-default 8.8.4.4 udp/53 1.1.1.1
-'''
+ACL 配置使用 YAML 格式，包含两个主要部分：
+
+1. **outbounds**: 定义出站连接类型
+2. **acl.inline**: 定义路由规则（按顺序匹配）
+
+### 示例配置
+
+```yaml
+# 定义出站
+outbounds:
+  - name: direct
+    type: direct
+    direct:
+      mode: auto  # auto, 4 (IPv4 only), 6 (IPv6 only)
+
+  - name: proxy
+    type: socks5
+    socks5:
+      addr: 127.0.0.1:1080
+      username: user  # 可选
+      password: pass  # 可选
+      allow_udp: false
+
+# 定义规则 (按顺序匹配)
+acl:
+  inline:
+    # 拒绝 QUIC 协议
+    - reject(all, udp/443)
+
+    # 通过代理路由特定域名
+    - proxy(suffix:google.com)
+    - proxy(geosite:openai)
+    - proxy(geosite:netflix)
+
+    # 私有网络直连
+    - direct(192.168.0.0/16)
+    - direct(10.0.0.0/8)
+
+    # 中国大陆 IP 直连
+    - direct(geoip:cn)
+
+    # 默认规则 (必须放在最后)
+    - direct(all)
 ```
 
-### 地址类型
+### 规则语法
 
-| 类型 | 示例 | 说明 |
-|------|------|------|
-| localhost | `localhost` | 本地主机 |
-| private | `private` | 所有私有/LAN 地址 |
-| IPv4 | `192.168.1.1` | IPv4 地址 |
-| IPv6 | `::1` | IPv6 地址 |
-| CIDR | `192.168.0.0/16` | CIDR 网络 |
-| 域名 | `example.com` | 精确域名匹配 |
-| 通配符 | `*.google.com` | 通配符域名匹配 |
-| 任意 | `*` | 匹配所有地址 |
+规则格式：`outbound_name(matcher[, protocol/port])`
 
-### 端口格式
+**地址匹配器**:
+- `all` 或 `*`: 匹配所有地址
+- `1.2.3.4`: 单个 IP 地址
+- `192.168.0.0/16`: CIDR 网段
+- `example.com`: 精确域名匹配
+- `*.example.com`: 通配符域名
+- `suffix:example.com`: 后缀匹配
+- `geoip:cn`: GeoIP 国家代码匹配
+- `geosite:google`: GeoSite 分类匹配
 
-| 格式 | 示例 | 说明 |
-|------|------|------|
-| 单端口 | `80` | 匹配 TCP/UDP 80 端口 |
-| 协议端口 | `tcp/80` | 仅匹配 TCP 80 端口 |
-| 端口范围 | `80-8080` | 端口范围 |
-| 端口列表 | `tcp/80,udp/53` | 多端口组合 |
-| 任意 | `*` | 匹配所有端口 |
+**协议/端口过滤** (可选):
+- `tcp/80`: TCP 端口 80
+- `udp/443`: UDP 端口 443
+- `tcp/80-443`: TCP 端口范围
+- `tcp`: 所有 TCP
+- `udp`: 所有 UDP
 
----
+**示例规则**:
+```yaml
+# 拒绝特定端口
+- reject(all, tcp/25)      # 阻止 SMTP
+- reject(all, udp/443)     # 阻止 QUIC
 
-## 出站配置
+# 域名路由
+- proxy(*.google.com)
+- proxy(suffix:youtube.com)
 
-### 直连出站
+# IP 路由
+- direct(192.168.0.0/16)
+- proxy(geoip:us)
 
-```toml
-[outbound.default]
-type = "direct"
-ip_mode = "v4first"            # v4first / v6first / v4only / v6only
-bind_ipv4 = "1.2.3.4"          # 绑定 IPv4 地址 (可选)
-bind_ipv6 = "::1"              # 绑定 IPv6 地址 (可选)
-bind_device = "eth0"           # 绑定网卡 (可选)
+# 组合规则
+- proxy(example.com, tcp/443)  # 仅 HTTPS
 ```
 
-### SOCKS5 出站
+### 默认行为
 
-```toml
-[outbound.socks5_proxy]
-type = "socks5"
-addr = "127.0.0.1:1080"        # SOCKS5 代理地址
-username = "user"              # 用户名 (可选)
-password = "pass"              # 密码 (可选)
-allow_udp = false              # 是否允许 UDP (默认 false)
-```
+如果未指定 `--acl-conf-file`，服务器将使用默认直连模式（所有流量直接路由）。
+
+完整配置示例请参考 [acl-example.yaml](acl-example.yaml)。
 
 ---
 

@@ -51,6 +51,7 @@ aws-lc-rs = { version = "1", default-features = false, optional = true, features
 bytes = { version = "1", default-features = false, features = ["std"] }
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
 serde_json = "1"
+serde_yaml = "0.9"
 figment = { version = "0.10", features = ["toml"] }
 educe = { version = "0.6", default-features = false, features = ["Default"] }
 derive_more = { version = "2", default-features = false, features = ["display"] }
@@ -60,6 +61,9 @@ ipnet = { version = "2", features = ["serde"] }
 regex = "1"
 pest = "2.7"
 pest_derive = "2.7"
+
+# ACL Engine
+acl-engine-r = { git = "https://github.com/xflash-panda/acl-engine-r", rev = "9460b9cf8f34091b6abf34b4024cd7fd352754c8" }
 
 # Logging
 time = { version = "0.3", features = ["macros", "local-offset"] }

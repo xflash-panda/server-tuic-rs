@@ -1,0 +1,10 @@
+# Basic ACL configuration test
+outbounds:
+  - name: direct
+    type: direct
+    direct:
+      mode: auto
+
+acl:
+  inline:
+    - direct(all)

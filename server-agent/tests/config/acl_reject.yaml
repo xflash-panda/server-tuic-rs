@@ -1,0 +1,12 @@
+# ACL configuration with reject rules
+outbounds:
+  - name: reject
+    type: reject
+
+  - name: direct
+    type: direct
+
+acl:
+  inline:
+    - reject(all, udp/443)
+    - direct(all)

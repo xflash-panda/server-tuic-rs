@@ -1,0 +1,63 @@
+# ACL Configuration Example for TUIC Server Agent
+#
+# This file demonstrates how to configure ACL (Access Control List) routing
+# for the TUIC server agent. ACL allows you to route traffic through different
+# outbounds based on rules.
+
+# Define outbounds (connection types)
+outbounds:
+  # Direct connection (default)
+  - name: direct
+    type: direct
+    direct:
+      mode: auto  # Options: auto, 4 (IPv4 only), 6 (IPv6 only)
+
+  # IPv4-only direct connection
+  - name: direct_v4
+    type: direct
+    direct:
+      mode: 4
+
+  # IPv6-only direct connection
+  - name: direct_v6
+    type: direct
+    direct:
+      mode: 6
+
+  # SOCKS5 proxy
+  - name: proxy
+    type: socks5
+    socks5:
+      addr: 127.0.0.1:1080
+      # Optional authentication
+      # username: myuser
+      # password: mypass
+      allow_udp: false  # Whether to allow UDP (default: false)
+
+# ACL rules (evaluated in order, first match wins)
+acl:
+  inline:
+    # Block QUIC protocol (UDP/443) to prevent protocol detection
+    - reject(all, udp/443)
+
+    # Block specific ports
+    - reject(all, tcp/25)   # Block SMTP
+    - reject(all, tcp/465)  # Block SMTPS
+    - reject(all, tcp/587)  # Block submission
+
+    # Route specific domains via proxy
+    # - proxy(suffix:google.com)
+    # - proxy(suffix:youtube.com)
+    # - proxy(geosite:openai)
+    # - proxy(geosite:netflix)
+
+    # Route specific IPs/networks directly
+    - direct(192.168.0.0/16)  # Private network
+    - direct(10.0.0.0/8)      # Private network
+
+    # Route by GeoIP
+    # - direct(geoip:cn)        # China traffic goes direct
+    # - proxy(geoip:us)         # US traffic via proxy
+
+    # Default rule (must be last)
+    - direct(all)  # All other traffic goes direct

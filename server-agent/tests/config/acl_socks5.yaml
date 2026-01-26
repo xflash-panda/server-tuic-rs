@@ -1,0 +1,17 @@
+# ACL configuration with SOCKS5
+outbounds:
+  - name: proxy
+    type: socks5
+    socks5:
+      addr: 127.0.0.1:1080
+      username: testuser
+      password: testpass
+      allow_udp: false
+
+  - name: direct
+    type: direct
+
+acl:
+  inline:
+    - proxy(suffix:google.com)
+    - direct(all)

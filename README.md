@@ -10,8 +10,8 @@ Fork 自 https://github.com/tuic-protocol/tuic
 
 - gRPC 控制面板集成，动态用户管理
 - 实时流量统计与上报
-- ACL 访问控制规则
-- 多出站模式 (直连 / SOCKS5)
+- **ACL 引擎路由**：基于规则的流量路由，支持域名/IP/CIDR/通配符匹配
+- 多出站类型：直连 (Direct)、SOCKS5 代理、拒绝 (Reject)
 - TLS 证书热重载
 
 ---
@@ -46,7 +46,8 @@ server-agent --server_host 127.0.0.1 --port 8082 --node 1
 | `--node <ID>` | 节点 ID | **必需** |
 | `--server_host <HOST>` | gRPC 服务器地址 | `127.0.0.1` |
 | `--port <PORT>` | gRPC 服务器端口 | `8082` |
-| `--ext_conf_file <PATH>` | 外部配置文件路径 | - |
+| `--ext_conf_file <PATH>` | 外部配置文件路径 (TOML) | - |
+| `--acl_conf_file <PATH>` | ACL 路由配置文件路径 (YAML) | - |
 | `--cert_file <PATH>` | TLS 证书文件路径 | `/root/.cert/server.crt` |
 | `--key_file <PATH>` | TLS 私钥文件路径 | `/root/.cert/server.key` |
 | `--log_mode <LEVEL>` | 日志级别 | `info` |
@@ -54,7 +55,23 @@ server-agent --server_host 127.0.0.1 --port 8082 --node 1
 | `--report_traffics_interval <SECS>` | 流量上报间隔 | `100` |
 | `--heartbeat_interval <SECS>` | 心跳间隔 | `180` |
 | `--data_dir <PATH>` | 数据目录路径 | `/var/lib/tuic-agent-node` |
-| `--init` | 生成示例配置文件 | - |
+| `--init` | 生成示例配置文件 (config.toml.example 和 acl.yaml.example) | - |
+
+### 快速开始
+
+1. 生成示例配置文件:
+```bash
+server-agent --init
+```
+
+2. 根据需要修改配置文件:
+   - `config.toml.example` → `config.toml` (TUIC 服务器配置)
+   - `acl.yaml.example` → `acl.yaml` (ACL 路由规则)
+
+3. 启动服务:
+```bash
+server-agent --node 1 --ext_conf_file config.toml --acl_conf_file acl.yaml
+```
 
 详细配置请参阅 [server-agent/README.md](server-agent/README.md)
 
