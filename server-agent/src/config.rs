@@ -497,6 +497,15 @@ acl:
 		if !cfg_path.exists() {
 			return Err(eyre::eyre!("Config file not found: {}", cfg_path.display()));
 		}
+		// Validate file extension before parsing
+		let ext = cfg_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+		if !ext.eq_ignore_ascii_case("toml") {
+			return Err(eyre::eyre!(
+				"Invalid config file format: expected .toml extension, got .{} (file: {})",
+				ext,
+				cfg_path.display()
+			));
+		}
 		figment = figment.merge(Toml::file(cfg_path));
 	}
 
@@ -509,6 +518,15 @@ acl:
 	if let Some(acl_path) = &cli.acl_conf_file {
 		if !acl_path.exists() {
 			return Err(eyre::eyre!("ACL config file not found: {}", acl_path.display()));
+		}
+		// Validate file extension before parsing
+		let ext = acl_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+		if !ext.eq_ignore_ascii_case("yaml") && !ext.eq_ignore_ascii_case("yml") {
+			return Err(eyre::eyre!(
+				"Invalid ACL config file format: expected .yaml or .yml extension, got .{} (file: {})",
+				ext,
+				acl_path.display()
+			));
 		}
 		let yaml_content = tokio::fs::read_to_string(acl_path).await?;
 		let acl_config: crate::acl::AclConfig = serde_yaml::from_str(&yaml_content)?;
