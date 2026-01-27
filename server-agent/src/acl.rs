@@ -157,6 +157,11 @@ impl AclEngine {
 			);
 		}
 
+		// Always register built-in "reject" outbound so it can be used in rules without explicit definition
+		outbounds
+			.entry("reject".to_string())
+			.or_insert_with(|| Arc::new(OutboundHandler::Reject));
+
 		// Get rules or use default
 		let rules = if acl_config.acl.inline.is_empty() {
 			tracing::debug!("No ACL rules defined, using default 'default(all)' rule");
