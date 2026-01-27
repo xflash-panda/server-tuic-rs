@@ -59,8 +59,8 @@ humantime-serde = "1"
 ip_network = "0.4"
 ipnet = { version = "2", features = ["serde"] }
 regex = "1"
-pest = "2.7"
-pest_derive = "2.7"
+pest = "2.8"
+pest_derive = "2.8"
 
 # ACL Engine
 acl-engine-r = { git = "https://github.com/xflash-panda/acl-engine-r", rev = "9460b9cf8f34091b6abf34b4024cd7fd352754c8" }
