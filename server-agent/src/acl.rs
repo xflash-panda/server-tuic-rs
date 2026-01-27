@@ -157,10 +157,14 @@ impl AclEngine {
 			);
 		}
 
-		// Always register built-in "reject" outbound so it can be used in rules without explicit definition
+		// Always register built-in outbounds so they can be used in rules without
+		// explicit definition
 		outbounds
 			.entry("reject".to_string())
 			.or_insert_with(|| Arc::new(OutboundHandler::Reject));
+		outbounds
+			.entry("direct".to_string())
+			.or_insert_with(|| Arc::new(OutboundHandler::Direct { mode: IpMode::Auto }));
 
 		// Get rules or use default
 		let rules = if acl_config.acl.inline.is_empty() {
