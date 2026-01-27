@@ -85,6 +85,10 @@ pub struct Cli {
 	/// gRPC request timeout (in seconds)
 	#[arg(long = "timeout", value_name = "SECONDS", default_value = "15")]
 	pub request_timeout: u64,
+
+	/// Force refresh geoip and geosite databases on startup
+	#[arg(long = "refresh_geodata", default_value = "false")]
+	pub refresh_geodata: bool,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -508,11 +512,11 @@ acl:
 		}
 		let yaml_content = tokio::fs::read_to_string(acl_path).await?;
 		let acl_config: crate::acl::AclConfig = serde_yaml::from_str(&yaml_content)?;
-		let acl_engine = crate::acl::AclEngine::new(acl_config).await?;
+		let acl_engine = crate::acl::AclEngine::new(acl_config, &cli.data_dir, cli.refresh_geodata).await?;
 		config.acl_engine = Some(std::sync::Arc::new(acl_engine));
 	} else {
 		// No ACL config provided, create default engine
-		let default_engine = crate::acl::create_default_engine().await?;
+		let default_engine = crate::acl::create_default_engine(&cli.data_dir, cli.refresh_geodata).await?;
 		config.acl_engine = Some(std::sync::Arc::new(default_engine));
 	}
 

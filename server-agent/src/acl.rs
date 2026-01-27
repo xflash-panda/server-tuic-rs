@@ -1,7 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::Path, sync::Arc, time::Duration};
 
 // Re-export types from acl-engine-r
-pub use acl_engine_r::{HostInfo, NilGeoLoader, Protocol};
+pub use acl_engine_r::{AutoGeoLoader, GeoIpFormat, GeoSiteFormat, HostInfo, NilGeoLoader, Protocol};
 use eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
 
@@ -138,7 +138,7 @@ pub struct AclEngine {
 
 impl AclEngine {
 	/// Create new ACL engine from configuration
-	pub async fn new(acl_config: AclConfig) -> Result<Self> {
+	pub async fn new(acl_config: AclConfig, data_dir: impl AsRef<Path>, refresh_geodata: bool) -> Result<Self> {
 		// Parse outbounds into handler map
 		let mut outbounds: HashMap<String, Arc<OutboundHandler>> = HashMap::new();
 
@@ -169,9 +169,21 @@ impl AclEngine {
 		let rules_text = rules.join("\n");
 		let text_rules = acl_engine_r::parse_rules(&rules_text).with_context(|| "Failed to parse ACL rules")?;
 
-		// Compile rules with outbound map and NilGeoLoader (no GeoIP support yet)
-		let compiled = acl_engine_r::compile(&text_rules, &outbounds, 1024, &NilGeoLoader)
-			.with_context(|| "Failed to compile ACL rules")?;
+		// Create AutoGeoLoader with MMDB for GeoIP and Sing (DB) for GeoSite
+		let mut geo_loader = AutoGeoLoader::new()
+			.with_data_dir(data_dir)
+			.with_geoip(GeoIpFormat::Mmdb)
+			.with_geosite(GeoSiteFormat::Sing);
+
+		// Force refresh geodata if requested
+		if refresh_geodata {
+			tracing::info!("Force refreshing geoip and geosite databases");
+			geo_loader = geo_loader.with_update_interval(Duration::ZERO);
+		}
+
+		// Compile rules with outbound map and AutoGeoLoader
+		let compiled =
+			acl_engine_r::compile(&text_rules, &outbounds, 1024, &geo_loader).with_context(|| "Failed to compile ACL rules")?;
 
 		tracing::info!(
 			"ACL engine initialized with {} outbounds and {} rules",
@@ -207,7 +219,7 @@ impl AclEngine {
 }
 
 /// Create a default ACL engine with direct routing for all traffic
-pub async fn create_default_engine() -> Result<AclEngine> {
+pub async fn create_default_engine(data_dir: impl AsRef<Path>, refresh_geodata: bool) -> Result<AclEngine> {
 	let default_config = AclConfig {
 		outbounds: vec![OutboundEntry {
 			name:          "default".to_string(),
@@ -221,7 +233,7 @@ pub async fn create_default_engine() -> Result<AclEngine> {
 		},
 	};
 
-	AclEngine::new(default_config).await
+	AclEngine::new(default_config, data_dir, refresh_geodata).await
 }
 
 #[cfg(test)]
@@ -282,6 +294,7 @@ acl:
 
 	#[tokio::test]
 	async fn test_acl_engine_creation() {
+		let temp_dir = tempfile::tempdir().unwrap();
 		let config = AclConfig {
 			outbounds: vec![OutboundEntry {
 				name:          "direct".to_string(),
@@ -295,7 +308,9 @@ acl:
 			},
 		};
 
-		let engine = AclEngine::new(config).await.expect("Failed to create ACL engine");
+		let engine = AclEngine::new(config, temp_dir.path(), false)
+			.await
+			.expect("Failed to create ACL engine");
 
 		// Test matching a domain
 		let result = engine.match_host("example.com", 80, Protocol::TCP);
@@ -311,6 +326,7 @@ acl:
 
 	#[tokio::test]
 	async fn test_acl_reject_handler() {
+		let temp_dir = tempfile::tempdir().unwrap();
 		let config = AclConfig {
 			outbounds: vec![
 				OutboundEntry {
@@ -331,7 +347,9 @@ acl:
 			},
 		};
 
-		let engine = AclEngine::new(config).await.expect("Failed to create ACL engine");
+		let engine = AclEngine::new(config, temp_dir.path(), false)
+			.await
+			.expect("Failed to create ACL engine");
 
 		// Test UDP/443 is rejected
 		let result = engine.match_host("example.com", 443, Protocol::UDP);
@@ -346,7 +364,10 @@ acl:
 
 	#[tokio::test]
 	async fn test_create_default_engine() {
-		let engine = create_default_engine().await.expect("Failed to create default engine");
+		let temp_dir = tempfile::tempdir().unwrap();
+		let engine = create_default_engine(temp_dir.path(), false)
+			.await
+			.expect("Failed to create default engine");
 
 		// Test that default engine allows everything
 		let result = engine.match_host("example.com", 80, Protocol::TCP);
