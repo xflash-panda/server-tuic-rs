@@ -186,7 +186,6 @@ impl AclEngine {
 
 		// Force refresh geodata if requested
 		if refresh_geodata {
-			tracing::info!("Force refreshing geoip and geosite databases");
 			geo_loader = geo_loader.with_update_interval(Duration::ZERO);
 		}
 

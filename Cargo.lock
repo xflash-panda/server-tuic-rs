@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "acl-engine-r"
 version = "0.1.0"
-source = "git+https://github.com/xflash-panda/acl-engine-r?rev=9460b9cf8f34091b6abf34b4024cd7fd352754c8#9460b9cf8f34091b6abf34b4024cd7fd352754c8"
+source = "git+https://github.com/xflash-panda/acl-engine-r?branch=dev#ec9ef9d2ee1a4b2f9a872ccf5443d47113691975"
 dependencies = [
  "base64",
  "ipnet",
@@ -20,6 +20,7 @@ dependencies = [
  "serde_json",
  "socket2 0.6.2",
  "thiserror 2.0.18",
+ "tracing",
  "ureq",
 ]
 
