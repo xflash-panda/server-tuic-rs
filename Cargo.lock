@@ -4,8 +4,8 @@ version = 4
 
 [[package]]
 name = "acl-engine-r"
-version = "0.1.0"
-source = "git+https://github.com/xflash-panda/acl-engine-r?branch=dev#ec9ef9d2ee1a4b2f9a872ccf5443d47113691975"
+version = "0.2.0"
+source = "git+https://github.com/xflash-panda/acl-engine-r?tag=v0.2.0#3c3301f56f7cf7f80243e782c792d4bf191cf4ac"
 dependencies = [
  "base64",
  "ipnet",
@@ -980,7 +980,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -1691,7 +1691,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -1729,7 +1729,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
