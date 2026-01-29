@@ -481,7 +481,10 @@ acl:
 		warn!("  1. Copy and rename: cp config.toml.example config.toml");
 		warn!("  2. Copy and rename: cp acl.yaml.example acl.yaml");
 		warn!("  3. Edit the files as needed");
-		warn!("  4. Run: tuic-server --node <ID> --api <URL> --token <TOKEN> --ext_conf_file config.toml --acl_conf_file acl.yaml");
+		warn!(
+			"  4. Run: tuic-server --node <ID> --api <URL> --token <TOKEN> --ext_conf_file config.toml --acl_conf_file \
+			 acl.yaml"
+		);
 		warn!("");
 		warn!("Or use default configuration (zero-config):");
 		warn!("  tuic-server --node <ID> --api <URL> --token <TOKEN>");
@@ -558,11 +561,11 @@ acl:
 		api_host,
 		token,
 		node_id,
-		timeout:                  30,
-		fetch_users_interval:     cli.fetch_users_interval,
+		timeout: 30,
+		fetch_users_interval: cli.fetch_users_interval,
 		report_traffics_interval: cli.report_traffics_interval,
-		heartbeat_interval:       cli.heartbeat_interval,
-		data_dir:                 cli.data_dir,
+		heartbeat_interval: cli.heartbeat_interval,
+		data_dir: cli.data_dir,
 	});
 
 	Ok(config)
