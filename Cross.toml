@@ -1,5 +1,19 @@
-[build]
-pre-build = ["apt-get update && apt-get install -y protobuf-compiler"]
-
 [build.env]
 passthrough = ["RUSTFLAGS", "RUST_LOG"]
+
+# GNU targets use Debian-based images
+[target.x86_64-unknown-linux-gnu]
+pre-build = ["apt-get update && apt-get install -y protobuf-compiler"]
+
+[target.aarch64-unknown-linux-gnu]
+pre-build = ["apt-get update && apt-get install -y protobuf-compiler"]
+
+[target.armv7-unknown-linux-gnueabihf]
+pre-build = ["apt-get update && apt-get install -y protobuf-compiler"]
+
+# MUSL targets use Alpine-based images
+[target.x86_64-unknown-linux-musl]
+pre-build = ["apk add --no-cache protoc protobuf-dev"]
+
+[target.aarch64-unknown-linux-musl]
+pre-build = ["apk add --no-cache protoc protobuf-dev"]
