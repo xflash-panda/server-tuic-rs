@@ -1,8 +1,4 @@
-use std::{
-	net::{Ipv4Addr, Ipv6Addr},
-	path::PathBuf,
-	time::Duration,
-};
+use std::{path::PathBuf, time::Duration};
 
 use clap::{Parser, ValueEnum};
 use educe::Educe;
@@ -13,12 +9,7 @@ use figment::{
 use serde::{Deserialize, Serialize};
 use tracing::{level_filters::LevelFilter, warn};
 
-#[cfg(test)]
-use crate::acl::{AclAddress, AclPorts};
-use crate::{
-	acl::AclRule,
-	utils::{CongestionController, StackPrefer},
-};
+use crate::utils::CongestionController;
 
 
 /// Control flow results for CLI parsing
@@ -42,7 +33,12 @@ pub struct Cli {
 	#[arg(long = "ext_conf_file", value_name = "PATH")]
 	pub ext_conf_file: Option<PathBuf>,
 
-	/// Generate an example configuration file (config.toml)
+	/// Path to the ACL config file (optional, YAML format)
+	#[arg(long = "acl_conf_file", value_name = "PATH")]
+	pub acl_conf_file: Option<PathBuf>,
+
+	/// Generate example configuration files (config.toml.example and
+	/// acl.yaml.example)
 	#[arg(short, long)]
 	pub init: bool,
 
@@ -59,16 +55,19 @@ pub struct Cli {
 	pub log_mode: LogLevel,
 
 	/// Server address (e.g., "https://api.example.com")
+	/// Required when running server, not needed for --init
 	#[arg(long, value_name = "URL")]
-	pub api: String,
+	pub api: Option<String>,
 
 	/// Token of server API
+	/// Required when running server, not needed for --init
 	#[arg(long, value_name = "TOKEN")]
-	pub token: String,
+	pub token: Option<String>,
 
 	/// Node ID
+	/// Required when running server, not needed for --init
 	#[arg(long, value_name = "ID")]
-	pub node: u32,
+	pub node: Option<u32>,
 
 	/// API request cycle for fetching users (in seconds)
 	#[arg(long = "fetch_users_interval", value_name = "SECONDS", default_value = "60")]
@@ -85,6 +84,10 @@ pub struct Cli {
 	/// Data directory for persisting state and other data
 	#[arg(long = "data_dir", value_name = "PATH", default_value = "/var/lib/tuic-node")]
 	pub data_dir: PathBuf,
+
+	/// Force refresh geoip and geosite databases on startup
+	#[arg(long = "refresh_geodata", default_value = "false")]
+	pub refresh_geodata: bool,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -159,13 +162,9 @@ pub struct Config {
 	#[educe(Default(expression = Duration::from_secs(60)))]
 	pub stream_timeout: Duration,
 
-	#[serde(default)]
-	pub outbound: OutboundConfig,
-
-	/// Access Control List rules
-	#[serde(default, deserialize_with = "crate::acl::deserialize_acl")]
-	#[educe(Default(expression = Vec::new()))]
-	pub acl: Vec<AclRule>,
+	/// ACL engine for rule-based routing (loaded from --acl_conf_file)
+	#[serde(skip)]
+	pub acl_engine: Option<std::sync::Arc<crate::acl::AclEngine>>,
 
 	pub experimental: ExperimentalConfig,
 
@@ -241,71 +240,6 @@ pub struct QuicConfig {
 	pub max_idle_time: Duration,
 }
 
-/// The `default` rule is mandatory when named rules are present; other named
-/// rules are optional.
-#[derive(Deserialize, Serialize, Educe, Clone, Debug)]
-#[educe(Default)]
-pub struct OutboundConfig {
-	/// The default outbound rule (used when no name is specified).
-	#[serde(default)]
-	pub default: OutboundRule,
-
-	/// Additional named outbound rules (e.g., `prefer_v4`, `through_socks5`).
-	#[serde(flatten)]
-	pub named: std::collections::HashMap<String, OutboundRule>,
-}
-
-/// Represents a single outbound rule (e.g., direct, socks5).
-#[derive(Deserialize, Serialize, Educe, Clone, Debug)]
-#[educe(Default)]
-#[serde(deny_unknown_fields)]
-pub struct OutboundRule {
-	/// The type of outbound: "direct" or "socks5".
-	#[educe(Default = "direct".to_string())]
-	#[serde(rename = "type")]
-	pub kind: String,
-
-	/// Mode for direct connections: "v4first" (prefer IPv4), "v6first" (prefer
-	/// IPv6), "v4only" (IPv4 only), "v6only" (IPv6 only).
-	#[educe(Default(expression = Some(StackPrefer::V4first)))]
-	pub ip_mode: Option<StackPrefer>,
-
-	/// Optional IPv4 address to bind to for direct connections (only used when
-	/// kind == "direct").
-	#[serde(default)]
-	pub bind_ipv4: Option<Ipv4Addr>,
-
-	/// Optional IPv6 address to bind to for direct connections (only used when
-	/// kind == "direct").
-	#[serde(default)]
-	pub bind_ipv6: Option<Ipv6Addr>,
-
-	/// Optional device/interface name to bind to (only used when kind ==
-	/// "direct").
-	#[serde(default)]
-	pub bind_device: Option<String>,
-
-	/// SOCKS5 address (only used when kind == "socks5").
-	#[serde(default)]
-	pub addr: Option<String>,
-
-	/// Optional SOCKS5 username (only used when kind == "socks5").
-	#[serde(default)]
-	pub username: Option<String>,
-
-	/// Optional SOCKS5 password (only used when kind == "socks5").
-	#[serde(default)]
-	pub password: Option<String>,
-
-	/// Whether to allow UDP traffic when this outbound is selected.
-	/// Only effective for kind == "socks5". Default behavior is to block UDP
-	/// (i.e., drop UDP packets) to avoid leaking QUIC/HTTP3 over direct path.
-	/// Set to true to allow UDP (still sent directly; UDP over SOCKS5 is not
-	/// implemented).
-	#[serde(default)]
-	pub allow_udp: Option<bool>,
-}
-
 #[derive(Deserialize, Serialize, Educe)]
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
@@ -359,23 +293,6 @@ impl Config {
 			}
 		}
 	}
-
-	pub fn full_example() -> Self {
-		Self {
-			// Provide a minimal outbound example
-			outbound: OutboundConfig {
-				default: OutboundRule {
-					kind: "direct".into(),
-					ip_mode: Some(StackPrefer::V4first),
-					..Default::default()
-				},
-				..Default::default()
-			},
-			// Example ACL list (empty by default)
-			acl: Vec::new(),
-			..Default::default()
-		}
-	}
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, ValueEnum)]
@@ -408,10 +325,166 @@ impl From<LogLevel> for LevelFilter {
 pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 	// Handle --init flag
 	if cli.init {
-		warn!("Generating an example configuration to config.toml......");
-		let example = Config::full_example();
-		let example = toml::to_string_pretty(&example).unwrap();
-		tokio::fs::write("config.toml", example).await?;
+		warn!("Generating example configuration files......");
+
+		// Generate TOML configuration file example
+		let toml_config = r#"# TUIC Server 配置文件示例
+# 此文件定义服务器的基础配置参数
+# 重命名为 config.toml 并通过 --ext_conf_file 参数使用
+
+# ============================================
+# 基础配置
+# ============================================
+
+# UDP 配置
+udp_relay_ipv6 = true          # 为 IPv6 UDP 创建单独套接字
+dual_stack = true              # 启用双栈 (IPv4/IPv6)
+
+# 超时配置
+auth_timeout = "3s"            # 客户端认证超时
+task_negotiation_timeout = "3s" # 任务协商超时
+gc_interval = "10s"            # UDP 片段垃圾回收间隔
+gc_lifetime = "30s"            # UDP 片段保留时间
+stream_timeout = "60s"         # 流超时
+
+# 数据包配置
+max_external_packet_size = 1500 # 外部 UDP 数据包最大大小
+
+# ============================================
+# QUIC 配置
+# ============================================
+
+[quic]
+initial_mtu = 1200             # 初始 MTU
+min_mtu = 1200                 # 最小 MTU (至少 1200)
+gso = true                     # 启用通用分段卸载
+pmtu = true                    # 启用路径 MTU 发现
+send_window = 16777216         # 发送窗口大小 (字节)
+receive_window = 8388608       # 接收窗口大小 (字节)
+max_idle_time = "30s"          # 空闲连接超时
+
+# 拥塞控制配置
+[quic.congestion_control]
+controller = "bbr"             # 拥塞控制算法: bbr / cubic / new_reno
+initial_window = 1048576       # 初始拥塞窗口 (字节)
+
+# ============================================
+# 实验性功能
+# ============================================
+
+[experimental]
+drop_loopback = true           # 禁止连接到环回地址 (127.0.0.1, ::1) - 默认启用
+drop_private = true            # 禁止连接到私有地址 - 默认启用
+
+# 注意:
+# - server_port 和 zero_rtt_handshake 从控制面板 API 动态获取
+# - 大部分用户不需要修改这些配置，默认值已经过优化
+# - 路由配置请使用 ACL 配置文件 (acl.yaml)
+# - 如需允许连接到私有地址/环回地址，请将上述配置设为 false
+"#;
+
+		tokio::fs::write("config.toml.example", toml_config).await?;
+		warn!("Generated config.toml.example (TUIC server configuration)");
+
+		// Generate default ACL configuration with comments
+		let default_acl_config = r#"# ACL 配置文件
+# 此文件定义了流量路由规则
+
+# 定义出站连接类型
+outbounds:
+  # 直连出站（默认）
+  - name: default
+    type: direct
+    direct:
+      mode: auto  # 选项: auto (自动), 4 (仅 IPv4), 6 (仅 IPv6)
+
+  # SOCKS5 代理出站（示例，默认禁用）
+  # 取消注释以启用 SOCKS5 代理
+  # - name: proxy
+  #   type: socks5
+  #   socks5:
+  #     addr: 127.0.0.1:1080
+  #     username: user  # 可选，如需认证请填写
+  #     password: pass  # 可选，如需认证请填写
+  #     allow_udp: false
+
+# ACL 路由规则（按顺序匹配，首次匹配生效）
+acl:
+  inline:
+    # 默认规则：所有流量直连
+    # 这是无配置文件时的默认行为
+    - default(all)
+
+    # 更多规则示例（取消注释以启用）:
+
+    # 阻止 QUIC 协议（防止协议检测）
+    # - reject(all, udp/443)
+
+    # 阻止 SMTP 端口
+    # - reject(all, tcp/25)
+    # - reject(all, tcp/465)
+    # - reject(all, tcp/587)
+
+    # 通过代理路由特定域名
+    # - proxy(suffix:google.com)
+    # - proxy(suffix:youtube.com)
+    # - proxy(geosite:openai)
+    # - proxy(geosite:netflix)
+
+    # 私有网络直连
+    # - default(192.168.0.0/16)
+    # - default(10.0.0.0/8)
+    # - default(172.16.0.0/12)
+
+    # 中国大陆 IP 直连（需要 GeoIP 数据库）
+    # - default(geoip:cn)
+
+    # 特定域名走代理，仅 HTTPS
+    # - proxy(example.com, tcp/443)
+
+# 规则语法说明:
+#
+# 格式: outbound_name(matcher[, protocol/port])
+#
+# 地址匹配器:
+#   all 或 *              匹配所有地址
+#   1.2.3.4              单个 IP 地址
+#   192.168.0.0/16       CIDR 网段
+#   example.com          精确域名匹配
+#   *.example.com        通配符域名
+#   suffix:example.com   后缀匹配
+#   geoip:cn             GeoIP 国家代码
+#   geosite:google       GeoSite 分类
+#
+# 协议/端口过滤 (可选):
+#   tcp/80               TCP 端口 80
+#   udp/443              UDP 端口 443
+#   tcp/80-443           TCP 端口范围
+#   tcp                  所有 TCP
+#   udp                  所有 UDP
+#
+# 注意:
+#   - 规则按顺序匹配，首次匹配的规则生效
+#   - 最后一条规则应该是兜底规则（如 default(all)）
+#   - reject 类型会直接丢弃连接
+#   - GeoIP/GeoSite 功能需要配置相应的数据库文件
+"#;
+
+		tokio::fs::write("acl.yaml.example", default_acl_config).await?;
+		warn!("Generated acl.yaml.example (ACL routing configuration)");
+		warn!("");
+		warn!("Configuration files generated:");
+		warn!("  - config.toml.example: TUIC server configuration");
+		warn!("  - acl.yaml.example:    ACL routing rules");
+		warn!("");
+		warn!("To use:");
+		warn!("  1. Copy and rename: cp config.toml.example config.toml");
+		warn!("  2. Copy and rename: cp acl.yaml.example acl.yaml");
+		warn!("  3. Edit the files as needed");
+		warn!("  4. Run: tuic-server --node <ID> --api <URL> --token <TOKEN> --ext_conf_file config.toml --acl_conf_file acl.yaml");
+		warn!("");
+		warn!("Or use default configuration (zero-config):");
+		warn!("  tuic-server --node <ID> --api <URL> --token <TOKEN>");
 		return Err(Control("Done").into());
 	}
 
@@ -423,6 +496,15 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 		if !cfg_path.exists() {
 			return Err(eyre::eyre!("Config file not found: {}", cfg_path.display()));
 		}
+		// Validate file extension before parsing
+		let ext = cfg_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+		if !ext.eq_ignore_ascii_case("toml") {
+			return Err(eyre::eyre!(
+				"Invalid config file format: expected .toml extension, got .{} (file: {})",
+				ext,
+				cfg_path.display()
+			));
+		}
 		figment = figment.merge(Toml::file(cfg_path));
 	}
 
@@ -431,16 +513,51 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 	// Migrate legacy fields to new nested structure
 	config.migrate();
 
+	// Parse ACL config if provided
+	if let Some(acl_path) = &cli.acl_conf_file {
+		if !acl_path.exists() {
+			return Err(eyre::eyre!("ACL config file not found: {}", acl_path.display()));
+		}
+		// Validate file extension before parsing
+		let ext = acl_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+		if !ext.eq_ignore_ascii_case("yaml") && !ext.eq_ignore_ascii_case("yml") {
+			return Err(eyre::eyre!(
+				"Invalid ACL config file format: expected .yaml or .yml extension, got .{} (file: {})",
+				ext,
+				acl_path.display()
+			));
+		}
+		let yaml_content = tokio::fs::read_to_string(acl_path).await?;
+		let acl_config: crate::acl::AclConfig = serde_yaml::from_str(&yaml_content)?;
+		let acl_engine = crate::acl::AclEngine::new(acl_config, &cli.data_dir, cli.refresh_geodata).await?;
+		config.acl_engine = Some(std::sync::Arc::new(acl_engine));
+	} else {
+		// No ACL config provided, create default engine
+		let default_engine = crate::acl::create_default_engine(&cli.data_dir, cli.refresh_geodata).await?;
+		config.acl_engine = Some(std::sync::Arc::new(default_engine));
+	}
+
 	// Set CLI arguments into config
 	config.log_mode = cli.log_mode;
 	config.cert_file = cli.cert_file;
 	config.key_file = cli.key_file;
 
+	// Check required parameters (not needed for --init mode)
+	let api_host = cli
+		.api
+		.ok_or_else(|| eyre::eyre!("--api <URL> is required when not using --init"))?;
+	let token = cli
+		.token
+		.ok_or_else(|| eyre::eyre!("--token <TOKEN> is required when not using --init"))?;
+	let node_id = cli
+		.node
+		.ok_or_else(|| eyre::eyre!("--node <ID> is required when not using --init"))?;
+
 	// Set panel configuration (required fields)
 	config.panel = Some(crate::panel::PanelConfig {
-		api_host:                 cli.api,
-		token:                    cli.token,
-		node_id:                  cli.node,
+		api_host,
+		token,
+		node_id,
 		timeout:                  30,
 		fetch_users_interval:     cli.fetch_users_interval,
 		report_traffics_interval: cli.report_traffics_interval,
@@ -458,7 +575,6 @@ mod tests {
 	use tempfile::tempdir;
 
 	use super::*;
-	use crate::acl::{AclPortSpec, AclProtocol};
 
 	async fn test_parse_config(config_content: &str) -> eyre::Result<Config> {
 		let temp_dir = tempdir().unwrap();
@@ -477,6 +593,8 @@ mod tests {
 			"test-token".to_owned(),
 			"--node".to_owned(),
 			"1".to_owned(),
+			"--data_dir".to_owned(),
+			temp_dir.path().to_string_lossy().into_owned(),
 		];
 
 		// Parse CLI with test arguments
@@ -535,155 +653,15 @@ mod tests {
 			assert!(!cli.ext_conf_file.unwrap().exists());
 		}
 
-		// Test missing required parameters - should fail
-		let result = Cli::try_parse_from(vec!["test_binary"]);
-		// This should fail because --api, --token, --node are required
-		assert!(result.is_err());
-	}
-
-	#[tokio::test]
-	async fn test_outbound_no_configuration() {
-		// Test that when no outbound configuration is provided, default is used
-		let config = include_str!("../tests/config/outbound_no_configuration.toml");
-
-		let result = test_parse_config(config).await.unwrap();
-
-		// Should have default outbound configuration
-		assert_eq!(result.outbound.default.kind, "direct");
-		assert_eq!(result.outbound.named.len(), 0);
-	}
-
-	#[tokio::test]
-	async fn test_outbound_valid_with_default() {
-		// Test that when named outbound rules exist with a proper default, validation
-		// passes
-		let config = include_str!("../tests/config/outbound_valid_with_default.toml");
-
-		let result = test_parse_config(config).await.unwrap();
-
-		// Should have default and named outbound configurations
-		assert_eq!(result.outbound.default.kind, "direct");
-		assert_eq!(result.outbound.named.len(), 2);
-
-		let prefer_v4 = result.outbound.named.get("prefer_v4").unwrap();
-		assert_eq!(prefer_v4.kind, "direct");
-		assert_eq!(prefer_v4.ip_mode, Some(StackPrefer::V4first));
-		assert_eq!(prefer_v4.bind_ipv4, Some("2.4.6.8".parse().unwrap()));
-		assert_eq!(prefer_v4.bind_device, Some("eth233".to_string()));
-
-		let socks5 = result.outbound.named.get("through_socks5").unwrap();
-		assert_eq!(socks5.kind, "socks5");
-		assert_eq!(socks5.addr, Some("127.0.0.1:1080".to_string()));
-		assert_eq!(socks5.username, Some("optional".to_string()));
-		assert_eq!(socks5.password, Some("optional".to_string()));
-	}
-
-	#[tokio::test]
-	async fn test_outbound_with_legacy_ip_mode_aliases() {
-		// Test backward compatibility with old ip_mode values like "prefer_v4",
-		// "only_v4" etc.
-		let config = include_str!("../tests/config/outbound_with_legacy_ip_mode_aliases.toml");
-
-		let result = test_parse_config(config).await.unwrap();
-
-		// Verify default uses prefer_v4 (which maps to V4first)
-		assert_eq!(result.outbound.default.ip_mode, Some(StackPrefer::V4first));
-
-		// Verify named rules with legacy aliases
-		let prefer_v6 = result.outbound.named.get("prefer_v6_rule").unwrap();
-		assert_eq!(prefer_v6.ip_mode, Some(StackPrefer::V6first));
-
-		let only_v4 = result.outbound.named.get("only_v4_rule").unwrap();
-		assert_eq!(only_v4.ip_mode, Some(StackPrefer::V4only));
-
-		let only_v6 = result.outbound.named.get("only_v6_rule").unwrap();
-		assert_eq!(only_v6.ip_mode, Some(StackPrefer::V6only));
-	}
-
-	#[tokio::test]
-	async fn test_acl_parsing() {
-		let config = include_str!("../tests/config/acl_parsing.toml");
-
-		let result = test_parse_config(config).await.unwrap();
-
-		assert_eq!(result.acl.len(), 10);
-
-		// Test first rule: "allow localhost udp/53"
-		let rule1 = &result.acl[0];
-		assert_eq!(rule1.outbound, "allow");
-		assert_eq!(rule1.addr, AclAddress::Localhost);
-		assert!(rule1.ports.is_some());
-		let ports1 = rule1.ports.as_ref().unwrap();
-		assert_eq!(ports1.entries.len(), 1);
-		assert_eq!(ports1.entries[0].protocol, Some(AclProtocol::Udp));
-		assert_eq!(ports1.entries[0].port_spec, AclPortSpec::Single(53));
-		assert!(rule1.hijack.is_none());
-
-		// Test complex ports rule: "allow localhost udp/53,tcp/80,tcp/443,udp/443"
-		let rule2 = &result.acl[1];
-		assert_eq!(rule2.outbound, "allow");
-		assert_eq!(rule2.addr, AclAddress::Localhost);
-		let ports2 = rule2.ports.as_ref().unwrap();
-		assert_eq!(ports2.entries.len(), 4);
-
-		// Test CIDR rule: "reject 10.6.0.0/16"
-		let rule4 = &result.acl[3];
-		assert_eq!(rule4.outbound, "reject");
-		assert_eq!(rule4.addr, AclAddress::Cidr("10.6.0.0/16".to_string()));
-
-		// Test wildcard domain: "allow *.google.com"
-		let rule6 = &result.acl[5];
-		assert_eq!(rule6.outbound, "allow");
-		assert_eq!(rule6.addr, AclAddress::WildcardDomain("*.google.com".to_string()));
-
-		// Test hijack rule: "default 8.8.4.4 udp/53 1.1.1.1"
-		let rule10 = &result.acl[9];
-		assert_eq!(rule10.outbound, "default");
-		assert_eq!(rule10.addr, AclAddress::Ip("8.8.4.4".to_string()));
-		assert!(rule10.ports.is_some());
-		assert_eq!(rule10.hijack, Some("1.1.1.1".to_string()));
-	}
-
-	#[tokio::test]
-	async fn test_acl_parsing_edge_cases() {
-		use serde::de::value::StrDeserializer;
-
-		// Test individual parsing functions using serde Deserialize
-		let addr: AclAddress =
-			serde::Deserialize::deserialize(StrDeserializer::<serde::de::value::Error>::new("localhost")).unwrap();
-		assert_eq!(addr, AclAddress::Localhost);
-
-		let addr: AclAddress =
-			serde::Deserialize::deserialize(StrDeserializer::<serde::de::value::Error>::new("*.example.com")).unwrap();
-		assert_eq!(addr, AclAddress::WildcardDomain("*.example.com".to_string()));
-
-		let addr: AclAddress =
-			serde::Deserialize::deserialize(StrDeserializer::<serde::de::value::Error>::new("192.168.1.0/24")).unwrap();
-		assert_eq!(addr, AclAddress::Cidr("192.168.1.0/24".to_string()));
-
-		let addr: AclAddress =
-			serde::Deserialize::deserialize(StrDeserializer::<serde::de::value::Error>::new("127.0.0.1")).unwrap();
-		assert_eq!(addr, AclAddress::Ip("127.0.0.1".to_string()));
-
-		let addr: AclAddress =
-			serde::Deserialize::deserialize(StrDeserializer::<serde::de::value::Error>::new("example.com")).unwrap();
-		assert_eq!(addr, AclAddress::Domain("example.com".to_string()));
-
-		// Test port parsing
-		let ports: AclPorts =
-			serde::Deserialize::deserialize(StrDeserializer::<serde::de::value::Error>::new("80,443,1000-2000,udp/53"))
-				.unwrap();
-		assert_eq!(ports.entries.len(), 4);
-		assert_eq!(ports.entries[0].port_spec, AclPortSpec::Single(80));
-		assert_eq!(ports.entries[2].port_spec, AclPortSpec::Range(1000, 2000));
-		assert_eq!(ports.entries[3].protocol, Some(AclProtocol::Udp));
-
-		// Test rule parsing
-		let rule = crate::acl::parse_acl_rule("allow google.com 80,443").unwrap();
-		assert_eq!(rule.outbound, "allow");
-		assert_eq!(rule.addr, AclAddress::Domain("google.com".to_string()));
-		assert!(rule.ports.is_some());
-		assert!(rule.hijack.is_none());
+		// Test that CLI parsing succeeds without --api, --token, --node
+		// (they are optional at CLI level, validated later in parse_config)
+		let result = Cli::try_parse_from(vec!["test_binary", "--init"]);
+		assert!(result.is_ok());
+		let cli = result.unwrap();
+		assert!(cli.init);
+		assert!(cli.api.is_none());
+		assert!(cli.token.is_none());
+		assert!(cli.node.is_none());
 	}
 
 	#[tokio::test]
@@ -740,23 +718,6 @@ mod tests {
 		assert_eq!(result.gc_interval, Duration::from_secs(30));
 		assert_eq!(result.gc_lifetime, Duration::from_secs(60));
 		assert_eq!(result.stream_timeout, Duration::from_secs(120));
-	}
-
-	#[tokio::test]
-	async fn test_empty_acl() {
-		let config = include_str!("../tests/config/empty_acl.toml");
-
-		let result = test_parse_config(config).await.unwrap();
-		assert_eq!(result.acl.len(), 0);
-	}
-
-	#[tokio::test]
-	async fn test_acl_comments_and_whitespace() {
-		let config = include_str!("../tests/config/acl_comments_and_whitespace.toml");
-
-		let result = test_parse_config(config).await.unwrap();
-		// Should have 3 rules
-		assert_eq!(result.acl.len(), 3);
 	}
 
 	#[tokio::test]
