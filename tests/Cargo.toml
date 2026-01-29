@@ -25,10 +25,10 @@ tokio = { version = "1", features = ["full"] }
 json5 = { version = "1.2" }
 lexopt = { version = "0.3" }
 eyre = { version = "0.6" }
-fast-socks5 = { version = "1.0.0-rc.0" }
+fast-socks5 = { version = "1.0.0" }
 rustls = { version = "0.23", default-features = false }
 tracing-test = { version = "0.2" }
 tracing = "0.1"
 serial_test = "3"
 aws-lc-rs = { version = "1", default-features = false, optional = true, features = ["prebuilt-nasm"] }
-server-r-client = { git = "https://github.com/xflash-panda/server-r-client.git", tag = "v0.1.6" }
+server-r-client = { git = "https://github.com/xflash-panda/server-r-client.git", tag = "v0.1.7" }
