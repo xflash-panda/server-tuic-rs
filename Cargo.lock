@@ -4,9 +4,10 @@ version = 4
 
 [[package]]
 name = "acl-engine-r"
-version = "0.2.0"
-source = "git+https://github.com/xflash-panda/acl-engine-r?tag=v0.2.0#3c3301f56f7cf7f80243e782c792d4bf191cf4ac"
+version = "0.3.0"
+source = "git+https://github.com/xflash-panda/acl-engine-r?tag=v0.3.0#3899bfa3021deeeec2d51e86ce84374851c521e7"
 dependencies = [
+ "async-trait",
  "base64",
  "ipnet",
  "log",
@@ -20,6 +21,7 @@ dependencies = [
  "serde_json",
  "socket2 0.6.2",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "ureq",
 ]
@@ -1992,7 +1994,7 @@ dependencies = [
 
 [[package]]
 name = "server"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "acl-engine-r",
  "arc-swap",
@@ -2193,7 +2195,7 @@ dependencies = [
 
 [[package]]
 name = "tests"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aws-lc-rs",
  "eyre",
@@ -2615,7 +2617,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuic"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "bytes",
  "eyre",
