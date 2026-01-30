@@ -1,7 +1,16 @@
 use std::{collections::HashMap, path::Path, sync::Arc, time::Duration};
 
 // Re-export types from acl-engine-r
-pub use acl_engine_r::{AutoGeoLoader, GeoIpFormat, GeoSiteFormat, HostInfo, NilGeoLoader, Protocol};
+pub use acl_engine_r::{
+	AutoGeoLoader,
+	GeoIpFormat,
+	GeoSiteFormat,
+	HostInfo,
+	NilGeoLoader,
+	Protocol,
+	// Async outbound types
+	outbound::{Addr, AsyncOutbound, AsyncTcpConn, Direct, DirectMode, Reject, Socks5},
+};
 use eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
 
@@ -69,6 +78,16 @@ pub enum IpMode {
 	V6Only,
 }
 
+impl From<IpMode> for DirectMode {
+	fn from(mode: IpMode) -> Self {
+		match mode {
+			IpMode::Auto => DirectMode::Auto,
+			IpMode::V4Only => DirectMode::Only4,
+			IpMode::V6Only => DirectMode::Only6,
+		}
+	}
+}
+
 /// SOCKS5 proxy configuration
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct Socks5Config {
@@ -96,15 +115,25 @@ pub struct AclRules {
 	pub inline: Vec<String>,
 }
 
-/// Outbound handler type
-#[derive(Clone, Debug)]
+/// Wrapper for async outbound handlers from acl-engine-r
+#[derive(Clone)]
 pub enum OutboundHandler {
-	/// Direct connection
-	Direct { mode: IpMode },
-	/// SOCKS5 proxy
-	Socks5 { config: Socks5Config },
-	/// Reject connection
-	Reject,
+	/// Direct connection using acl-engine-r's Direct
+	Direct(Arc<Direct>),
+	/// SOCKS5 proxy using acl-engine-r's Socks5
+	Socks5 { inner: Arc<Socks5>, allow_udp: bool },
+	/// Reject connection using acl-engine-r's Reject
+	Reject(Arc<Reject>),
+}
+
+impl std::fmt::Debug for OutboundHandler {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			OutboundHandler::Direct(_) => write!(f, "OutboundHandler::Direct"),
+			OutboundHandler::Socks5 { allow_udp, .. } => write!(f, "OutboundHandler::Socks5 {{ allow_udp: {} }}", allow_udp),
+			OutboundHandler::Reject(_) => write!(f, "OutboundHandler::Reject"),
+		}
+	}
 }
 
 impl OutboundHandler {
@@ -114,16 +143,50 @@ impl OutboundHandler {
 			"direct" => match &entry.config {
 				OutboundEntryConfig::Direct { direct } => {
 					let mode = direct.as_ref().map(|d| d.mode).unwrap_or(IpMode::Auto);
-					Ok(OutboundHandler::Direct { mode })
+					let direct_mode: DirectMode = mode.into();
+					Ok(OutboundHandler::Direct(Arc::new(Direct::with_mode(direct_mode))))
 				}
 				_ => eyre::bail!("Invalid config for direct outbound '{}'", entry.name),
 			},
 			"socks5" => match &entry.config {
-				OutboundEntryConfig::Socks5 { socks5 } => Ok(OutboundHandler::Socks5 { config: socks5.clone() }),
+				OutboundEntryConfig::Socks5 { socks5 } => {
+					let inner = if let (Some(username), Some(password)) = (&socks5.username, &socks5.password) {
+						Socks5::with_auth(&socks5.addr, username, password)
+					} else {
+						Socks5::new(&socks5.addr)
+					};
+					Ok(OutboundHandler::Socks5 {
+						inner:     Arc::new(inner),
+						allow_udp: socks5.allow_udp,
+					})
+				}
 				_ => eyre::bail!("Invalid config for socks5 outbound '{}'", entry.name),
 			},
-			"reject" => Ok(OutboundHandler::Reject),
+			"reject" => Ok(OutboundHandler::Reject(Arc::new(Reject::new()))),
 			unknown => eyre::bail!("Unknown outbound type '{}' for outbound '{}'", unknown, entry.name),
+		}
+	}
+
+	/// Check if this handler is a reject type
+	pub fn is_reject(&self) -> bool {
+		matches!(self, OutboundHandler::Reject(_))
+	}
+
+	/// Check if UDP is allowed for this handler
+	pub fn allows_udp(&self) -> bool {
+		match self {
+			OutboundHandler::Direct(_) => true,
+			OutboundHandler::Socks5 { allow_udp, .. } => *allow_udp,
+			OutboundHandler::Reject(_) => false,
+		}
+	}
+
+	/// Get the async outbound implementation for TCP
+	pub fn as_async_outbound(&self) -> &dyn AsyncOutbound {
+		match self {
+			OutboundHandler::Direct(d) => d.as_ref(),
+			OutboundHandler::Socks5 { inner, .. } => inner.as_ref(),
+			OutboundHandler::Reject(r) => r.as_ref(),
 		}
 	}
 }
@@ -153,7 +216,7 @@ impl AclEngine {
 			tracing::debug!("No outbounds defined, creating default direct outbound");
 			outbounds.insert(
 				"default".to_string(),
-				Arc::new(OutboundHandler::Direct { mode: IpMode::Auto }),
+				Arc::new(OutboundHandler::Direct(Arc::new(Direct::new()))),
 			);
 		}
 
@@ -161,10 +224,10 @@ impl AclEngine {
 		// explicit definition
 		outbounds
 			.entry("reject".to_string())
-			.or_insert_with(|| Arc::new(OutboundHandler::Reject));
+			.or_insert_with(|| Arc::new(OutboundHandler::Reject(Arc::new(Reject::new()))));
 		outbounds
 			.entry("direct".to_string())
-			.or_insert_with(|| Arc::new(OutboundHandler::Direct { mode: IpMode::Auto }));
+			.or_insert_with(|| Arc::new(OutboundHandler::Direct(Arc::new(Direct::new()))));
 
 		// Get rules or use default
 		let rules = if acl_config.acl.inline.is_empty() {
@@ -323,13 +386,7 @@ acl:
 		// Test matching a domain
 		let result = engine.match_host("example.com", 80, Protocol::TCP);
 		assert!(result.is_some());
-
-		match result.unwrap().as_ref() {
-			OutboundHandler::Direct { mode } => {
-				assert_eq!(*mode, IpMode::Auto);
-			}
-			_ => panic!("Expected Direct handler"),
-		}
+		assert!(matches!(result.unwrap().as_ref(), OutboundHandler::Direct(_)));
 	}
 
 	#[tokio::test]
@@ -362,12 +419,12 @@ acl:
 		// Test UDP/443 is rejected
 		let result = engine.match_host("example.com", 443, Protocol::UDP);
 		assert!(result.is_some());
-		assert!(matches!(result.unwrap().as_ref(), OutboundHandler::Reject));
+		assert!(result.unwrap().is_reject());
 
 		// Test TCP/443 is not rejected
 		let result = engine.match_host("example.com", 443, Protocol::TCP);
 		assert!(result.is_some());
-		assert!(matches!(result.unwrap().as_ref(), OutboundHandler::Direct { .. }));
+		assert!(matches!(result.unwrap().as_ref(), OutboundHandler::Direct(_)));
 	}
 
 	#[tokio::test]
@@ -380,7 +437,7 @@ acl:
 		// Test that default engine allows everything
 		let result = engine.match_host("example.com", 80, Protocol::TCP);
 		assert!(result.is_some());
-		assert!(matches!(result.unwrap().as_ref(), OutboundHandler::Direct { .. }));
+		assert!(matches!(result.unwrap().as_ref(), OutboundHandler::Direct(_)));
 	}
 
 	#[test]
