@@ -9,7 +9,7 @@ pub use acl_engine_r::{
 	NilGeoLoader,
 	Protocol,
 	// Async outbound types
-	outbound::{Addr, AsyncOutbound, AsyncTcpConn, Direct, DirectMode, Reject, Socks5},
+	outbound::{Addr, AsyncOutbound, AsyncTcpConn, Direct, DirectMode, Http, Reject, Socks5},
 };
 use eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -47,6 +47,8 @@ pub struct OutboundEntry {
 pub enum OutboundEntryConfig {
 	/// SOCKS5 proxy configuration
 	Socks5 { socks5: Socks5Config },
+	/// HTTP proxy configuration
+	Http { http: HttpConfig },
 	/// Direct connection configuration
 	Direct {
 		#[serde(skip_serializing_if = "Option::is_none")]
@@ -107,6 +109,18 @@ pub struct Socks5Config {
 	pub allow_udp: bool,
 }
 
+/// HTTP proxy configuration
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct HttpConfig {
+	/// HTTP proxy URL (e.g., "http://127.0.0.1:8080" or "http://user:pass@127.0.0.1:8080")
+	/// Supports both http:// and https:// schemes
+	pub url: String,
+
+	/// Skip TLS certificate verification (for https:// proxies)
+	#[serde(default)]
+	pub insecure: bool,
+}
+
 /// ACL rules configuration
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct AclRules {
@@ -122,6 +136,8 @@ pub enum OutboundHandler {
 	Direct(Arc<Direct>),
 	/// SOCKS5 proxy using acl-engine-r's Socks5
 	Socks5 { inner: Arc<Socks5>, allow_udp: bool },
+	/// HTTP proxy using acl-engine-r's Http
+	Http(Arc<Http>),
 	/// Reject connection using acl-engine-r's Reject
 	Reject(Arc<Reject>),
 }
@@ -131,6 +147,7 @@ impl std::fmt::Debug for OutboundHandler {
 		match self {
 			OutboundHandler::Direct(_) => write!(f, "OutboundHandler::Direct"),
 			OutboundHandler::Socks5 { allow_udp, .. } => write!(f, "OutboundHandler::Socks5 {{ allow_udp: {} }}", allow_udp),
+			OutboundHandler::Http(_) => write!(f, "OutboundHandler::Http"),
 			OutboundHandler::Reject(_) => write!(f, "OutboundHandler::Reject"),
 		}
 	}
@@ -162,6 +179,14 @@ impl OutboundHandler {
 				}
 				_ => eyre::bail!("Invalid config for socks5 outbound '{}'", entry.name),
 			},
+			"http" => match &entry.config {
+				OutboundEntryConfig::Http { http } => {
+					let inner = Http::from_url_with_options(&http.url, http.insecure)
+						.map_err(|e| eyre::eyre!("Failed to parse HTTP proxy URL: {}", e))?;
+					Ok(OutboundHandler::Http(Arc::new(inner)))
+				}
+				_ => eyre::bail!("Invalid config for http outbound '{}'", entry.name),
+			},
 			"reject" => Ok(OutboundHandler::Reject(Arc::new(Reject::new()))),
 			unknown => eyre::bail!("Unknown outbound type '{}' for outbound '{}'", unknown, entry.name),
 		}
@@ -177,6 +202,7 @@ impl OutboundHandler {
 		match self {
 			OutboundHandler::Direct(_) => true,
 			OutboundHandler::Socks5 { allow_udp, .. } => *allow_udp,
+			OutboundHandler::Http(_) => false, // HTTP proxy doesn't support UDP
 			OutboundHandler::Reject(_) => false,
 		}
 	}
@@ -186,6 +212,7 @@ impl OutboundHandler {
 		match self {
 			OutboundHandler::Direct(d) => d.as_ref(),
 			OutboundHandler::Socks5 { inner, .. } => inner.as_ref(),
+			OutboundHandler::Http(h) => h.as_ref(),
 			OutboundHandler::Reject(r) => r.as_ref(),
 		}
 	}
@@ -457,5 +484,297 @@ acl:
 
 		let v6: IpMode = serde_yaml::from_str("\"6\"").unwrap();
 		assert_eq!(v6, IpMode::V6Only);
+	}
+
+	/// Test ACL rule matching based on acl-o.yaml style config
+	#[tokio::test]
+	async fn test_acl_rule_matching_with_socks5_outbound() {
+		let temp_dir = tempfile::tempdir().unwrap();
+
+		// Create config similar to acl-o.yaml
+		let config = AclConfig {
+			outbounds: vec![OutboundEntry {
+				name:          "warp".to_string(),
+				outbound_type: "socks5".to_string(),
+				config:        OutboundEntryConfig::Socks5 {
+					socks5: Socks5Config {
+						addr:      "127.0.0.1:40000".to_string(),
+						username:  None,
+						password:  None,
+						allow_udp: false,
+					},
+				},
+			}],
+			acl:       AclRules {
+				inline: vec![
+					"reject(all, udp/443)".to_string(),
+					"warp(all, tcp/22)".to_string(),
+					"warp(suffix:google.com)".to_string(),
+					"direct(all)".to_string(),
+				],
+			},
+		};
+
+		let engine = AclEngine::new(config, temp_dir.path(), false)
+			.await
+			.expect("Failed to create ACL engine");
+
+		// Test 1: UDP/443 should be rejected
+		let result = engine.match_host("example.com", 443, Protocol::UDP);
+		assert!(result.is_some());
+		assert!(result.unwrap().is_reject(), "UDP/443 should be rejected");
+
+		// Test 2: TCP/22 should go through warp (socks5)
+		let result = engine.match_host("example.com", 22, Protocol::TCP);
+		assert!(result.is_some());
+		assert!(
+			matches!(result.unwrap().as_ref(), OutboundHandler::Socks5 { .. }),
+			"TCP/22 should go through socks5"
+		);
+
+		// Test 3: google.com should go through warp (socks5) - suffix match
+		let result = engine.match_host("www.google.com", 443, Protocol::TCP);
+		assert!(result.is_some());
+		assert!(
+			matches!(result.unwrap().as_ref(), OutboundHandler::Socks5 { .. }),
+			"google.com should go through socks5 via suffix match"
+		);
+
+		// Test 4: Other traffic should go direct
+		let result = engine.match_host("example.com", 80, Protocol::TCP);
+		assert!(result.is_some());
+		assert!(
+			matches!(result.unwrap().as_ref(), OutboundHandler::Direct(_)),
+			"Other traffic should go direct"
+		);
+	}
+
+	/// Test actual TCP connection through Direct outbound
+	#[tokio::test]
+	async fn test_direct_outbound_tcp_connection() {
+		use tokio::{
+			io::{AsyncReadExt, AsyncWriteExt},
+			net::TcpListener,
+		};
+
+		// Create a local TCP server
+		let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+		let port = listener.local_addr().unwrap().port();
+
+		// Spawn server task
+		let server_handle = tokio::spawn(async move {
+			let (mut socket, _) = listener.accept().await.unwrap();
+			let mut buf = [0u8; 1024];
+			let n = socket.read(&mut buf).await.unwrap();
+			// Echo back
+			socket.write_all(&buf[..n]).await.unwrap();
+		});
+
+		// Create Direct outbound
+		let direct = Direct::new();
+		let handler = OutboundHandler::Direct(Arc::new(direct));
+
+		// Dial TCP using AsyncOutbound
+		let mut addr = Addr::new("127.0.0.1", port);
+		let tcp_conn_result = handler.as_async_outbound().dial_tcp(&mut addr).await;
+		assert!(tcp_conn_result.is_ok(), "Failed to dial TCP: {:?}", tcp_conn_result.err());
+
+		let mut tcp_conn = tcp_conn_result.unwrap();
+
+		// Send data
+		let test_data = b"Hello, World!";
+		tcp_conn.write_all(test_data).await.expect("Failed to write");
+
+		// Read response
+		let mut response = vec![0u8; test_data.len()];
+		tcp_conn.read_exact(&mut response).await.expect("Failed to read");
+
+		assert_eq!(&response, test_data, "Echo response mismatch");
+
+		// Wait for server to finish
+		server_handle.await.unwrap();
+	}
+
+	/// Test that AsyncTcpConn from outbound works with tokio I/O
+	#[tokio::test]
+	async fn test_async_tcp_conn_bidirectional_io() {
+		use tokio::{
+			io::{AsyncReadExt, AsyncWriteExt},
+			net::TcpListener,
+		};
+
+		// Create a local TCP server that echoes back
+		let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+		let port = listener.local_addr().unwrap().port();
+
+		let server_handle = tokio::spawn(async move {
+			let (mut socket, _) = listener.accept().await.unwrap();
+			let mut buf = [0u8; 1024];
+			let n = socket.read(&mut buf).await.unwrap();
+			// Echo back with prefix
+			let response = format!("ECHO:{}", String::from_utf8_lossy(&buf[..n]));
+			socket.write_all(response.as_bytes()).await.unwrap();
+		});
+
+		// Create Direct outbound and dial
+		let direct = Direct::new();
+		let handler = OutboundHandler::Direct(Arc::new(direct));
+		let mut addr = Addr::new("127.0.0.1", port);
+		let mut tcp_conn = handler.as_async_outbound().dial_tcp(&mut addr).await.unwrap();
+
+		// Send data
+		tcp_conn.write_all(b"test").await.unwrap();
+
+		// Read response - AsyncTcpConn implements AsyncRead
+		let mut response = vec![0u8; 64];
+		let n = tcp_conn.read(&mut response).await.unwrap();
+
+		let response_str = String::from_utf8_lossy(&response[..n]);
+		assert_eq!(response_str, "ECHO:test", "Response mismatch");
+
+		server_handle.await.unwrap();
+	}
+
+	/// Test that socks5 outbound handler can be constructed and used
+	#[tokio::test]
+	async fn test_socks5_outbound_handler_construction() {
+		let entry = OutboundEntry {
+			name:          "test-socks5".to_string(),
+			outbound_type: "socks5".to_string(),
+			config:        OutboundEntryConfig::Socks5 {
+				socks5: Socks5Config {
+					addr:      "127.0.0.1:1080".to_string(),
+					username:  Some("user".to_string()),
+					password:  Some("pass".to_string()),
+					allow_udp: true,
+				},
+			},
+		};
+
+		let handler = OutboundHandler::from_entry(&entry).expect("Failed to create handler");
+
+		// Verify it's a Socks5 handler
+		assert!(matches!(handler, OutboundHandler::Socks5 { .. }));
+
+		// Verify UDP is allowed
+		assert!(handler.allows_udp());
+
+		// Verify it's not reject
+		assert!(!handler.is_reject());
+	}
+
+	/// Test that http outbound handler can be constructed
+	#[tokio::test]
+	async fn test_http_outbound_handler_construction() {
+		let entry = OutboundEntry {
+			name:          "test-http".to_string(),
+			outbound_type: "http".to_string(),
+			config:        OutboundEntryConfig::Http {
+				http: HttpConfig {
+					url:      "http://127.0.0.1:8080".to_string(),
+					insecure: false,
+				},
+			},
+		};
+
+		let handler = OutboundHandler::from_entry(&entry).expect("Failed to create handler");
+
+		// Verify it's an Http handler
+		assert!(matches!(handler, OutboundHandler::Http(_)));
+
+		// Verify UDP is NOT allowed (HTTP doesn't support UDP)
+		assert!(!handler.allows_udp());
+
+		// Verify it's not reject
+		assert!(!handler.is_reject());
+	}
+
+	/// Test http outbound with authentication
+	#[tokio::test]
+	async fn test_http_outbound_with_auth() {
+		let entry = OutboundEntry {
+			name:          "test-http-auth".to_string(),
+			outbound_type: "http".to_string(),
+			config:        OutboundEntryConfig::Http {
+				http: HttpConfig {
+					url:      "http://user:pass@127.0.0.1:8080".to_string(),
+					insecure: false,
+				},
+			},
+		};
+
+		let handler = OutboundHandler::from_entry(&entry).expect("Failed to create handler with auth");
+		assert!(matches!(handler, OutboundHandler::Http(_)));
+	}
+
+	/// Test http config parsing from YAML
+	#[tokio::test]
+	async fn test_parse_http_config() {
+		let yaml = r#"
+outbounds:
+  - name: proxy
+    type: http
+    http:
+      url: http://user:pass@192.168.1.1:8080
+      insecure: true
+
+acl:
+  inline:
+    - proxy(all)
+"#;
+		let config: AclConfig = serde_yaml::from_str(yaml).expect("Failed to parse YAML");
+		assert_eq!(config.outbounds.len(), 1);
+		assert_eq!(config.outbounds[0].name, "proxy");
+		assert_eq!(config.outbounds[0].outbound_type, "http");
+
+		match &config.outbounds[0].config {
+			OutboundEntryConfig::Http { http } => {
+				assert_eq!(http.url, "http://user:pass@192.168.1.1:8080");
+				assert!(http.insecure);
+			}
+			_ => panic!("Expected Http config"),
+		}
+	}
+
+	/// Test ACL rule matching with http outbound
+	#[tokio::test]
+	async fn test_acl_rule_matching_with_http_outbound() {
+		let temp_dir = tempfile::tempdir().unwrap();
+
+		let config = AclConfig {
+			outbounds: vec![OutboundEntry {
+				name:          "httpproxy".to_string(),
+				outbound_type: "http".to_string(),
+				config:        OutboundEntryConfig::Http {
+					http: HttpConfig {
+						url:      "http://127.0.0.1:8080".to_string(),
+						insecure: false,
+					},
+				},
+			}],
+			acl:       AclRules {
+				inline: vec!["httpproxy(suffix:example.com)".to_string(), "direct(all)".to_string()],
+			},
+		};
+
+		let engine = AclEngine::new(config, temp_dir.path(), false)
+			.await
+			.expect("Failed to create ACL engine");
+
+		// Test: example.com should go through http proxy
+		let result = engine.match_host("www.example.com", 443, Protocol::TCP);
+		assert!(result.is_some());
+		assert!(
+			matches!(result.unwrap().as_ref(), OutboundHandler::Http(_)),
+			"example.com should go through http proxy"
+		);
+
+		// Test: other traffic should go direct
+		let result = engine.match_host("google.com", 80, Protocol::TCP);
+		assert!(result.is_some());
+		assert!(
+			matches!(result.unwrap().as_ref(), OutboundHandler::Direct(_)),
+			"Other traffic should go direct"
+		);
 	}
 }

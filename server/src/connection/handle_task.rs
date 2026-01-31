@@ -76,16 +76,20 @@ impl Connection {
 				.map_err(|e| eyre!("Failed to connect: {}", e))?;
 
 			// Check if the peer address should be blocked (experimental filters)
-			if let Ok(peer_addr) = tcp_conn.peer_addr() {
-				if self.should_drop_address(&peer_addr) {
-					debug!(
-						"[{id:#010x}] [{addr}] [{user}] [TCP] {target_addr} blocked (loopback/private)",
-						id = self.id(),
-						addr = self.inner.remote_address(),
-						user = self.auth,
-					);
-					_ = conn.reset(ERROR_CODE);
-					return Ok(());
+			// Only check for Direct outbound - for proxied connections (Socks5, etc.),
+			// peer_addr() returns the proxy server address, not the actual target
+			if matches!(outbound.as_ref(), OutboundHandler::Direct(_)) {
+				if let Ok(peer_addr) = tcp_conn.peer_addr() {
+					if self.should_drop_address(&peer_addr) {
+						debug!(
+							"[{id:#010x}] [{addr}] [{user}] [TCP] {target_addr} blocked (loopback/private)",
+							id = self.id(),
+							addr = self.inner.remote_address(),
+							user = self.auth,
+						);
+						_ = conn.reset(ERROR_CODE);
+						return Ok(());
+					}
 				}
 			}
 
@@ -274,7 +278,9 @@ impl Connection {
 				.ok_or_else(|| eyre!("Failed to resolve UDP target address"))?;
 
 			// Check if address should be blocked (experimental filters)
-			if self.should_drop_address(&socket_addr) {
+			// Only check for Direct outbound - for proxied connections, the target
+			// is handled by the proxy and we shouldn't block based on resolved address
+			if matches!(outbound.as_ref(), OutboundHandler::Direct(_)) && self.should_drop_address(&socket_addr) {
 				debug!(
 					"[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] to {src_addr} \
 					 blocked (loopback/private)",
