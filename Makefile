@@ -8,8 +8,8 @@
 
 # 项目配置
 CARGO := cargo
-PACKAGE := server
-BINARY_NAME := server
+PACKAGE := server-tuic
+BINARY_NAME := server-tuic
 TARGET_DIR := target
 
 # 颜色输出

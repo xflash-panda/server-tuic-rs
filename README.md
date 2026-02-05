@@ -20,23 +20,23 @@ Fork 自 https://github.com/tuic-protocol/tuic
 
 ```bash
 # 默认 (aws-lc-rs)
-cargo build --release -p server
+cargo build --release -p server-tuic
 
 # 使用 ring
-cargo build --release -p server --no-default-features --features ring
+cargo build --release -p server-tuic --no-default-features --features ring
 
 # 启用 JEMalloc
-cargo build --release -p server --features jemallocator
+cargo build --release -p server-tuic --features jemallocator
 ```
 
-编译产物: `target/release/server`
+编译产物: `target/release/server-tuic`
 
 ---
 
 ## 运行
 
 ```bash
-server --api https://api.example.com --token YOUR_TOKEN --node 1
+server-tuic --api https://api.example.com --token YOUR_TOKEN --node 1
 ```
 
 ### 命令行参数
@@ -56,7 +56,7 @@ server --api https://api.example.com --token YOUR_TOKEN --node 1
 | `--data_dir <PATH>` | 数据目录路径 | `/var/lib/tuic-node` |
 | `--init` | 生成示例配置文件 | - |
 
-详细配置请参阅 [server/README.md](server/README.md)
+详细配置请参阅 [server-tuic/README.md](server-tuic/README.md)
 
 ---
 
