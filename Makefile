@@ -8,8 +8,8 @@
 
 # 项目配置
 CARGO := cargo
-PACKAGE_AGENT := server-agent
-BINARY_NAME_AGENT := server-agent
+PACKAGE_AGENT := server-tuic-agent
+BINARY_NAME_AGENT := server-tuic-agent
 TARGET_DIR := target
 
 # 颜色输出

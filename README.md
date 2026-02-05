@@ -20,23 +20,23 @@ Fork 自 https://github.com/tuic-protocol/tuic
 
 ```bash
 # 默认 (aws-lc-rs)
-cargo build --release -p server-agent
+cargo build --release -p server-tuic-agent
 
 # 使用 ring
-cargo build --release -p server-agent --no-default-features --features ring
+cargo build --release -p server-tuic-agent --no-default-features --features ring
 
 # 启用 JEMalloc
-cargo build --release -p server-agent --features jemallocator
+cargo build --release -p server-tuic-agent --features jemallocator
 ```
 
-编译产物: `target/release/server-agent`
+编译产物: `target/release/server-tuic-agent`
 
 ---
 
 ## 运行
 
 ```bash
-server-agent --server_host 127.0.0.1 --port 8082 --node 1
+server-tuic-agent --server_host 127.0.0.1 --port 8082 --node 1
 ```
 
 ### 命令行参数
@@ -61,7 +61,7 @@ server-agent --server_host 127.0.0.1 --port 8082 --node 1
 
 1. 生成示例配置文件:
 ```bash
-server-agent --init
+server-tuic-agent --init
 ```
 
 2. 根据需要修改配置文件:
@@ -70,10 +70,10 @@ server-agent --init
 
 3. 启动服务:
 ```bash
-server-agent --node 1 --ext_conf_file config.toml --acl_conf_file acl.yaml
+server-tuic-agent --node 1 --ext_conf_file config.toml --acl_conf_file acl.yaml
 ```
 
-详细配置请参阅 [server-agent/README.md](server-agent/README.md)
+详细配置请参阅 [server-tuic-agent/README.md](server-tuic-agent/README.md)
 
 ---
 

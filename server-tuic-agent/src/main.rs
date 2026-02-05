@@ -1,7 +1,7 @@
 use std::process;
 
 use clap::Parser;
-use server_agent::config::{Cli, Control, parse_config};
+use server_tuic_agent::config::{Cli, Control, parse_config};
 #[cfg(feature = "jemallocator")]
 use tikv_jemallocator::Jemalloc;
 use tracing::level_filters::LevelFilter;
@@ -38,7 +38,7 @@ async fn main() -> eyre::Result<()> {
 		.with_targets(vec![
 			("tuic", cfg.log_mode),
 			("tuic_quinn", cfg.log_mode),
-			("server_agent", cfg.log_mode),
+			("server_tuic_agent", cfg.log_mode),
 		])
 		.with_default(LevelFilter::INFO);
 	let registry = tracing_subscriber::registry();
@@ -49,7 +49,7 @@ async fn main() -> eyre::Result<()> {
 		)))
 		.try_init()?;
 
-	server_agent::run(cfg).await?;
+	server_tuic_agent::run(cfg).await?;
 
 	Ok(())
 }

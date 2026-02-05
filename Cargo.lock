@@ -2127,8 +2127,47 @@ dependencies = [
 ]
 
 [[package]]
-name = "server-agent"
-version = "0.2.1"
+name = "server-r-agent-proto"
+version = "0.1.1"
+source = "git+https://github.com/xflash-panda/server-r-agent-proto.git?tag=v0.1.2#61b552dc5312f4f206ae5eb18bdc013240716e83"
+dependencies = [
+ "prost",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
+]
+
+[[package]]
+name = "server-r-client"
+version = "0.1.6"
+source = "git+https://github.com/xflash-panda/server-r-client?branch=dev#fdc16695c179266a814974a7f640b07844b518df"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "server-r-client"
+version = "0.1.7"
+source = "git+https://github.com/xflash-panda/server-r-client?tag=v0.1.7#ad66648e37f4f8dd766456d00aaf745b62c23080"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "server-tuic-agent"
+version = "0.2.2"
 dependencies = [
  "acl-engine-r",
  "arc-swap",
@@ -2172,45 +2211,6 @@ dependencies = [
  "tracing-subscriber",
  "tuic-core",
  "uuid",
-]
-
-[[package]]
-name = "server-r-agent-proto"
-version = "0.1.1"
-source = "git+https://github.com/xflash-panda/server-r-agent-proto.git?tag=v0.1.2#61b552dc5312f4f206ae5eb18bdc013240716e83"
-dependencies = [
- "prost",
- "tonic",
- "tonic-prost",
- "tonic-prost-build",
-]
-
-[[package]]
-name = "server-r-client"
-version = "0.1.6"
-source = "git+https://github.com/xflash-panda/server-r-client?branch=dev#fdc16695c179266a814974a7f640b07844b518df"
-dependencies = [
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "server-r-client"
-version = "0.1.7"
-source = "git+https://github.com/xflash-panda/server-r-client?tag=v0.1.7#ad66648e37f4f8dd766456d00aaf745b62c23080"
-dependencies = [
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "url",
 ]
 
 [[package]]
@@ -2356,7 +2356,7 @@ dependencies = [
 
 [[package]]
 name = "tests"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "aws-lc-rs",
  "eyre",
@@ -2365,8 +2365,8 @@ dependencies = [
  "lexopt",
  "rustls",
  "serial_test",
- "server-agent",
  "server-r-client 0.1.6",
+ "server-tuic-agent",
  "tokio",
  "tracing",
  "tracing-test",
@@ -2863,7 +2863,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuic-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "bytes",
  "eyre",
