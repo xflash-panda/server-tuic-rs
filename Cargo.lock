@@ -1993,8 +1993,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "server"
-version = "0.2.1"
+name = "server-r-client"
+version = "0.1.7"
+source = "git+https://github.com/xflash-panda/server-r-client.git?tag=v0.1.7#ad66648e37f4f8dd766456d00aaf745b62c23080"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "server-tuic"
+version = "0.2.3"
 dependencies = [
  "acl-engine-r",
  "arc-swap",
@@ -2036,20 +2050,6 @@ dependencies = [
  "tracing-subscriber",
  "tuic",
  "uuid",
-]
-
-[[package]]
-name = "server-r-client"
-version = "0.1.7"
-source = "git+https://github.com/xflash-panda/server-r-client.git?tag=v0.1.7#ad66648e37f4f8dd766456d00aaf745b62c23080"
-dependencies = [
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "url",
 ]
 
 [[package]]
@@ -2195,7 +2195,7 @@ dependencies = [
 
 [[package]]
 name = "tests"
-version = "0.2.1"
+version = "0.2.3"
 dependencies = [
  "aws-lc-rs",
  "eyre",
@@ -2204,8 +2204,8 @@ dependencies = [
  "lexopt",
  "rustls",
  "serial_test",
- "server",
  "server-r-client",
+ "server-tuic",
  "tokio",
  "tracing",
  "tracing-test",
@@ -2617,7 +2617,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuic"
-version = "0.2.1"
+version = "0.2.3"
 dependencies = [
  "bytes",
  "eyre",

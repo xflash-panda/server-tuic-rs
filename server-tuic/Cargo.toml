@@ -1,5 +1,5 @@
 [package]
-name = "server"
+name = "server-tuic"
 version.workspace = true
 authors.workspace = true
 description = "Minimalistic TUIC server implementation as a reference"
