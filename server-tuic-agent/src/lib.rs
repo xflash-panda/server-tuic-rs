@@ -4,6 +4,7 @@
 use std::{
 	collections::HashMap,
 	sync::{Arc, atomic::AtomicUsize},
+	time::Duration,
 };
 
 use moka::future::Cache;
@@ -100,9 +101,19 @@ pub async fn run(mut cfg: Config) -> eyre::Result<()> {
 	// This updates cfg with values from panel API (e.g., server_port)
 	panel_service.init(&mut cfg).await?;
 
+	// Build dedicated runtime for Panel service to isolate HTTP I/O
+	// from the TUIC server's thread pool
+	let panel_runtime = tokio::runtime::Builder::new_multi_thread()
+		.worker_threads(2)
+		.thread_name("panel-rt")
+		.enable_all()
+		.build()
+		.map_err(|e| eyre::eyre!("Failed to build panel runtime: {}", e))?;
+	let panel_runtime_handle = panel_runtime.handle().clone();
+
 	// Spawn run_inner in a separate task to catch panics
 	let panel_for_inner = panel_service.clone();
-	let handle = tokio::spawn(async move { run_inner(panel_for_inner, cfg).await });
+	let handle = tokio::spawn(async move { run_inner(panel_for_inner, cfg, panel_runtime_handle).await });
 
 	// Wait for the task to complete and handle both normal completion and panic
 	let result = match handle.await {
@@ -121,18 +132,31 @@ pub async fn run(mut cfg: Config) -> eyre::Result<()> {
 		}
 	};
 
-	// Close panel service gracefully - always called regardless of success,
-	// failure, or panic
+	// Close panel service on the panel runtime (HTTP unregister call)
 	info!("Closing panel service...");
-	if let Err(e) = panel_service.close().await {
-		error!("Failed to close panel service: {}", e);
+	let panel_for_close = panel_service.clone();
+	match panel_runtime
+		.handle()
+		.spawn(async move { panel_for_close.close().await })
+		.await
+	{
+		Ok(Ok(())) => {}
+		Ok(Err(e)) => error!("Failed to close panel service: {}", e),
+		Err(e) => error!("Panel close task panicked: {}", e),
 	}
+
+	// Shutdown the panel runtime
+	panel_runtime.shutdown_timeout(Duration::from_secs(10));
 
 	result
 }
 
 /// Inner run function that can return early on error
-async fn run_inner(panel_service: Arc<OptionalPanel>, cfg: Config) -> eyre::Result<()> {
+async fn run_inner(
+	panel_service: Arc<OptionalPanel>,
+	cfg: Config,
+	panel_runtime_handle: tokio::runtime::Handle,
+) -> eyre::Result<()> {
 	// Create shutdown signal channel
 	let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
@@ -148,10 +172,10 @@ async fn run_inner(panel_service: Arc<OptionalPanel>, cfg: Config) -> eyre::Resu
 		online_clients,
 	});
 
-	// Spawn panel service run task
+	// Spawn panel service on the dedicated panel runtime
 	let panel_for_run = panel_service.clone();
 	let ctx_for_panel = ctx.clone();
-	let panel_handle = tokio::spawn(async move {
+	let panel_handle = panel_runtime_handle.spawn(async move {
 		if let Err(e) = panel_for_run.run(ctx_for_panel).await {
 			error!("Panel service error: {}", e);
 		}
