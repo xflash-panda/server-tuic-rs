@@ -64,7 +64,7 @@ pest = "2.8"
 pest_derive = "2.8"
 
 # ACL Engine
-acl-engine-r = { git = "https://github.com/xflash-panda/acl-engine-r", tag = "v0.4.1" }
+acl-engine-r = { git = "https://github.com/xflash-panda/acl-engine-r", tag = "v0.4.2" }
 
 # Logging
 time = { version = "0.3", features = ["macros", "local-offset"] }
