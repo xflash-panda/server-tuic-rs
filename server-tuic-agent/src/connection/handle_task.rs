@@ -263,13 +263,12 @@ impl Connection {
 				.resolve_info()
 				.as_ref()
 				.and_then(|info| {
-					if let Some(ipv4) = info.ipv4 {
-						Some(SocketAddr::new(std::net::IpAddr::V4(ipv4), acl_addr.port()))
-					} else if let Some(ipv6) = info.ipv6 {
-						Some(SocketAddr::new(std::net::IpAddr::V6(ipv6), acl_addr.port()))
-					} else {
-						None
-					}
+					info.ipv4
+						.map(|ipv4| SocketAddr::new(std::net::IpAddr::V4(ipv4), acl_addr.port()))
+						.or_else(|| {
+							info.ipv6
+								.map(|ipv6| SocketAddr::new(std::net::IpAddr::V6(ipv6), acl_addr.port()))
+						})
 				})
 				.or_else(|| {
 					// Try to parse the host as a socket address
