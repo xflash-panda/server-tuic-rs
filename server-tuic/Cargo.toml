@@ -27,7 +27,8 @@ uuid = { version = "1", default-features = false, features = ["serde", "std", "v
 moka = { version = "0.12", features = ["future"] }
 
 # QUIC
-quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "log"] }
+quinn = { workspace = true, default-features = false, features = ["runtime-tokio", "qlog"] }
+quinn-congestions = { workspace = true }
 
 # TUIC
 tuic = { path = "../tuic", default-features = false, features = ["async_marshal", "marshal", "model"] }
