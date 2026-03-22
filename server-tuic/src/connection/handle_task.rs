@@ -101,7 +101,7 @@ impl Connection {
 			if err.is_some() {
 				_ = conn.reset(ERROR_CODE);
 			} else {
-				_ = conn.finish();
+				_ = conn.finish().await;
 			}
 			_ = stream.shutdown().await;
 
@@ -260,20 +260,19 @@ impl Connection {
 
 			// Get the resolved address for sending
 			let socket_addr = acl_addr
-				.resolve_info
+				.resolve_info()
 				.as_ref()
 				.and_then(|info| {
-					if let Some(ipv4) = info.ipv4 {
-						Some(SocketAddr::new(std::net::IpAddr::V4(ipv4), acl_addr.port))
-					} else if let Some(ipv6) = info.ipv6 {
-						Some(SocketAddr::new(std::net::IpAddr::V6(ipv6), acl_addr.port))
-					} else {
-						None
-					}
+					info.ipv4
+						.map(|ipv4| SocketAddr::new(std::net::IpAddr::V4(ipv4), acl_addr.port()))
+						.or_else(|| {
+							info.ipv6
+								.map(|ipv6| SocketAddr::new(std::net::IpAddr::V6(ipv6), acl_addr.port()))
+						})
 				})
 				.or_else(|| {
 					// Try to parse the host as a socket address
-					format!("{}:{}", acl_addr.host, acl_addr.port).parse().ok()
+					format!("{}:{}", acl_addr.host(), acl_addr.port()).parse().ok()
 				})
 				.ok_or_else(|| eyre!("Failed to resolve UDP target address"))?;
 
@@ -292,8 +291,8 @@ impl Connection {
 				return Ok(());
 			}
 
-			// Close the UDP connection from acl-engine-r (we use our own UdpSession)
-			_ = udp_conn.close().await;
+			// Drop the UDP connection from acl-engine-r (we use our own UdpSession)
+			drop(udp_conn);
 
 			// Record traffic and request stats for UDP outbound
 			if self.auth.is_authenticated() {
