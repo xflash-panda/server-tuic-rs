@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "acl-engine-r"
 version = "0.4.1"
-source = "git+https://github.com/xflash-panda/acl-engine-r?tag=v0.4.1#f879ae9069287adcce158d4c7869aa0d41e67875"
+source = "git+https://github.com/xflash-panda/acl-engine-r?tag=v0.4.2#a27ce7cbf2ae1654c165258c4791ea74a2fb71bb"
 dependencies = [
  "async-trait",
  "base64",
@@ -994,7 +994,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -1736,7 +1736,7 @@ dependencies = [
  "quinn-udp 0.5.14",
  "rustc-hash",
  "rustls",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -1828,7 +1828,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -1842,7 +1842,7 @@ dependencies = [
  "libc",
  "socket2 0.5.10",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2111,7 +2111,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3323,7 +3323,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
