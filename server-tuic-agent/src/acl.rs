@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::Path, sync::Arc, time::Duration};
+use std::{collections::HashMap, num::NonZero, path::Path, sync::Arc, time::Duration};
 
 // Re-export types from acl-engine-r
 pub use acl_engine_r::{
@@ -169,6 +169,7 @@ impl OutboundHandler {
 				OutboundEntryConfig::Socks5 { socks5 } => {
 					let inner = if let (Some(username), Some(password)) = (&socks5.username, &socks5.password) {
 						Socks5::with_auth(&socks5.addr, username, password)
+							.map_err(|e| eyre::eyre!("Failed to create SOCKS5 proxy with auth: {}", e))?
 					} else {
 						Socks5::new(&socks5.addr)
 					};
@@ -181,7 +182,7 @@ impl OutboundHandler {
 			},
 			"http" => match &entry.config {
 				OutboundEntryConfig::Http { http } => {
-					let inner = Http::from_url_with_options(&http.url, http.insecure)
+					let inner = Http::from_url(&http.url)
 						.map_err(|e| eyre::eyre!("Failed to parse HTTP proxy URL: {}", e))?;
 					Ok(OutboundHandler::Http(Arc::new(inner)))
 				}
@@ -281,7 +282,7 @@ impl AclEngine {
 
 		// Compile rules with outbound map and AutoGeoLoader
 		let compiled =
-			acl_engine_r::compile(&text_rules, &outbounds, 1024, &geo_loader).with_context(|| "Failed to compile ACL rules")?;
+			acl_engine_r::compile(&text_rules, &outbounds, NonZero::new(1024).unwrap(), &geo_loader).with_context(|| "Failed to compile ACL rules")?;
 
 		tracing::info!(
 			"ACL engine initialized with {} outbounds and {} rules",
