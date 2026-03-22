@@ -9,7 +9,7 @@ pub use acl_engine_r::{
 	NilGeoLoader,
 	Protocol,
 	// Async outbound types
-	outbound::{Addr, AsyncOutbound, AsyncTcpConn, Direct, DirectMode, Http, Reject, Socks5},
+	outbound::{Addr, AsyncOutbound, AsyncTcpConn, Direct, DirectMode, DirectOptions, Http, Reject, Socks5},
 };
 use eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -57,27 +57,60 @@ pub enum OutboundEntryConfig {
 }
 
 /// Direct connection configuration
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct DirectConfig {
-	/// IP mode: auto, 4 (v4only), 6 (v6only)
-	#[serde(default = "default_mode")]
+	/// IP mode: auto, 4 (v4only), 6 (v6only), 64 (prefer6), 46 (prefer4)
+	#[serde(default)]
 	pub mode: IpMode,
+
+	/// Bind to specific local IPv4 address
+	#[serde(default, skip_serializing_if = "Option::is_none", rename = "bindIPv4")]
+	pub bind_ipv4: Option<String>,
+
+	/// Bind to specific local IPv6 address
+	#[serde(default, skip_serializing_if = "Option::is_none", rename = "bindIPv6")]
+	pub bind_ipv6: Option<String>,
+
+	/// Bind to network device (Linux only, mutually exclusive with bindIPv4/bindIPv6)
+	#[serde(default, skip_serializing_if = "Option::is_none", rename = "bindDevice")]
+	pub bind_device: Option<String>,
+
+	/// Enable TCP Fast Open (Linux/macOS)
+	#[serde(default, rename = "fastOpen")]
+	pub fast_open: bool,
+
+	/// Disable Nagle's algorithm (default: true)
+	#[serde(default = "default_true", rename = "tcpNodelay")]
+	pub tcp_nodelay: bool,
+
+	/// TCP keepalive interval in seconds (default: 60, null to disable)
+	#[serde(default = "default_keepalive", skip_serializing_if = "Option::is_none", rename = "tcpKeepalive")]
+	pub tcp_keepalive: Option<u64>,
 }
 
-fn default_mode() -> IpMode {
-	IpMode::Auto
+fn default_true() -> bool {
+	true
+}
+
+fn default_keepalive() -> Option<u64> {
+	Some(60)
 }
 
 /// IP mode for direct connections
-#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum IpMode {
 	#[serde(rename = "auto")]
+	#[default]
 	Auto,
 	#[serde(rename = "4")]
 	V4Only,
 	#[serde(rename = "6")]
 	V6Only,
+	#[serde(rename = "64")]
+	Prefer64,
+	#[serde(rename = "46")]
+	Prefer46,
 }
 
 impl From<IpMode> for DirectMode {
@@ -86,6 +119,8 @@ impl From<IpMode> for DirectMode {
 			IpMode::Auto => DirectMode::Auto,
 			IpMode::V4Only => DirectMode::Only4,
 			IpMode::V6Only => DirectMode::Only6,
+			IpMode::Prefer64 => DirectMode::Prefer64,
+			IpMode::Prefer46 => DirectMode::Prefer46,
 		}
 	}
 }
@@ -159,9 +194,20 @@ impl OutboundHandler {
 		match entry.outbound_type.as_str() {
 			"direct" => match &entry.config {
 				OutboundEntryConfig::Direct { direct } => {
-					let mode = direct.as_ref().map(|d| d.mode).unwrap_or(IpMode::Auto);
-					let direct_mode: DirectMode = mode.into();
-					Ok(OutboundHandler::Direct(Arc::new(Direct::with_mode(direct_mode))))
+					let cfg = direct.as_ref().cloned().unwrap_or_default();
+					let opts = DirectOptions {
+						mode:          cfg.mode.into(),
+						bind_ip4:      cfg.bind_ipv4.as_deref().and_then(|s| s.parse().ok()),
+						bind_ip6:      cfg.bind_ipv6.as_deref().and_then(|s| s.parse().ok()),
+						bind_device:   cfg.bind_device,
+						fast_open:     cfg.fast_open,
+						tcp_nodelay:   cfg.tcp_nodelay,
+						tcp_keepalive: cfg.tcp_keepalive.map(Duration::from_secs),
+						..Default::default()
+					};
+					let inner = Direct::with_options(opts)
+						.map_err(|e| eyre::eyre!("Failed to create direct outbound: {}", e))?;
+					Ok(OutboundHandler::Direct(Arc::new(inner)))
 				}
 				_ => eyre::bail!("Invalid config for direct outbound '{}'", entry.name),
 			},
@@ -324,7 +370,7 @@ pub async fn create_default_engine(data_dir: impl AsRef<Path>, refresh_geodata: 
 			name:          "default".to_string(),
 			outbound_type: "direct".to_string(),
 			config:        OutboundEntryConfig::Direct {
-				direct: Some(DirectConfig { mode: IpMode::Auto }),
+				direct: Some(DirectConfig { mode: IpMode::Auto, ..Default::default() }),
 			},
 		}],
 		acl:       AclRules {
@@ -399,7 +445,7 @@ acl:
 				name:          "direct".to_string(),
 				outbound_type: "direct".to_string(),
 				config:        OutboundEntryConfig::Direct {
-					direct: Some(DirectConfig { mode: IpMode::Auto }),
+					direct: Some(DirectConfig { mode: IpMode::Auto, ..Default::default() }),
 				},
 			}],
 			acl:       AclRules {
@@ -431,7 +477,7 @@ acl:
 					name:          "direct".to_string(),
 					outbound_type: "direct".to_string(),
 					config:        OutboundEntryConfig::Direct {
-						direct: Some(DirectConfig { mode: IpMode::Auto }),
+						direct: Some(DirectConfig { mode: IpMode::Auto, ..Default::default() }),
 					},
 				},
 			],
