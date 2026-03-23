@@ -46,6 +46,16 @@ impl Error {
 	}
 }
 
+impl From<ConnectionError> for Error {
+	fn from(err: ConnectionError) -> Self {
+		match err {
+			ConnectionError::TimedOut => Self::TimedOut,
+			ConnectionError::LocallyClosed => Self::LocallyClosed,
+			_ => Self::Io(IoError::from(err)),
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use uuid::Uuid;
@@ -72,15 +82,5 @@ mod tests {
 		assert!(Error::LocallyClosed.is_trivial());
 		assert!(!Error::AuthFailed(Uuid::nil()).is_trivial());
 		assert!(!Error::DuplicatedAuth.is_trivial());
-	}
-}
-
-impl From<ConnectionError> for Error {
-	fn from(err: ConnectionError) -> Self {
-		match err {
-			ConnectionError::TimedOut => Self::TimedOut,
-			ConnectionError::LocallyClosed => Self::LocallyClosed,
-			_ => Self::Io(IoError::from(err)),
-		}
 	}
 }
