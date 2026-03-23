@@ -35,7 +35,7 @@ tuic = { path = "../tuic", default-features = false, features = ["async_marshal"
 register-count = { version = "0.1.0", default-features = false, features = ["std"] }
 
 # Panel API Client
-server-r-client = { git = "https://github.com/xflash-panda/server-r-client.git", tag = "v0.1.7" }
+server-r-client = { git = "https://github.com/xflash-panda/server-r-client.git", tag = "v0.1.11" }
 hostname = "0.4"
 
 # Tokio/Async
