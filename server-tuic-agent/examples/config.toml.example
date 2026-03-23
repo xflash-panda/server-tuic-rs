@@ -1,0 +1,24 @@
+udp_relay_ipv6 = true
+dual_stack = true
+
+auth_timeout = "3s"
+task_negotiation_timeout = "3s"
+gc_interval = "10s"
+gc_lifetime = "30s"
+stream_timeout = "60s"
+
+max_external_packet_size = 1500
+
+[quic]
+initial_window = 1048576
+initial_mtu = 1200
+min_mtu = 1200
+gso = true
+pmtu = true
+send_window = 16777216
+receive_window = 8388608
+max_idle_time = "30s"
+
+[experimental]
+drop_loopback = true
+drop_private = true

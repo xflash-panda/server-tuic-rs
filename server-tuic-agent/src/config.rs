@@ -6,7 +6,7 @@ use figment::{
 	Figment,
 	providers::{Format, Serialized, Toml},
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::IgnoredAny};
 use tracing::{level_filters::LevelFilter, warn};
 
 use crate::utils::CongestionController;
@@ -128,6 +128,10 @@ pub struct Config {
 	#[educe(Default = true)]
 	pub udp_relay_ipv6: bool,
 
+	/// Congestion control algorithm (set from panel API during init)
+	#[serde(skip)]
+	pub congestion_control: CongestionController,
+
 	/// Zero RTT handshake (set from panel API during init)
 	#[serde(skip)]
 	pub zero_rtt_handshake: bool,
@@ -179,18 +183,18 @@ pub struct Config {
 	#[serde(default, skip_serializing, rename = "private_key")]
 	#[deprecated]
 	pub __private_key:        Option<serde::de::IgnoredAny>,
-	#[serde(default, rename = "congestion_control")]
+	#[serde(default, skip_serializing, rename = "congestion_control")]
 	#[deprecated]
-	pub __congestion_control: Option<CongestionController>,
+	pub __congestion_control: Option<IgnoredAny>,
 	#[serde(default, rename = "alpn")]
 	#[deprecated]
 	pub __alpn:               Option<Vec<String>>,
 	#[serde(default, rename = "max_idle_time", with = "humantime_serde")]
 	#[deprecated]
 	pub __max_idle_time:      Option<Duration>,
-	#[serde(default, rename = "initial_window")]
+	#[serde(default, skip_serializing, rename = "initial_window")]
 	#[deprecated]
-	pub __initial_window:     Option<u64>,
+	pub __initial_window:     Option<IgnoredAny>,
 	#[serde(default, rename = "receive_window")]
 	#[deprecated]
 	pub __send_window:        Option<u64>,
@@ -216,7 +220,13 @@ pub struct Config {
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct QuicConfig {
-	pub congestion_control: CongestionControlConfig,
+	/// Old congestion_control section (deprecated, now fetched from panel API)
+	#[serde(default, skip_serializing, rename = "congestion_control")]
+	#[deprecated]
+	pub __congestion_control: Option<IgnoredAny>,
+
+	#[educe(Default = 1048576)]
+	pub initial_window: u64,
 
 	#[educe(Default = 1200)]
 	pub initial_mtu: u16,
@@ -241,15 +251,6 @@ pub struct QuicConfig {
 	pub max_idle_time: Duration,
 }
 
-#[derive(Deserialize, Serialize, Educe)]
-#[educe(Default)]
-#[serde(default, deny_unknown_fields)]
-pub struct CongestionControlConfig {
-	pub controller:     CongestionController,
-	#[educe(Default = 1048576)]
-	pub initial_window: u64,
-}
-
 #[derive(Deserialize, Serialize, Educe, Clone)]
 #[educe(Default)]
 #[serde(default)]
@@ -262,17 +263,12 @@ pub struct ExperimentalConfig {
 
 impl Config {
 	pub fn migrate(&mut self) {
-		// Migrate QUIC-related fields
+		// Migrate QUIC-related fields (congestion_control and initial_window are now
+		// from API)
 		#[allow(deprecated)]
 		{
-			if let Some(congestion_control) = self.__congestion_control {
-				self.quic.congestion_control.controller = congestion_control;
-			}
 			if let Some(max_idle_time) = self.__max_idle_time {
 				self.quic.max_idle_time = max_idle_time;
-			}
-			if let Some(initial_window) = self.__initial_window {
-				self.quic.congestion_control.initial_window = initial_window;
 			}
 			if let Some(send_window) = self.__send_window {
 				self.quic.send_window = send_window;
@@ -326,166 +322,9 @@ impl From<LogLevel> for LevelFilter {
 pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 	// Handle --init flag
 	if cli.init {
-		warn!("Generating example configuration files......");
-
-		// Generate TOML configuration file example
-		let toml_config = r#"# TUIC Server 配置文件示例
-# 此文件定义服务器的基础配置参数
-# 重命名为 config.toml 并通过 --ext_conf_file 参数使用
-
-# ============================================
-# 基础配置
-# ============================================
-
-# UDP 配置
-udp_relay_ipv6 = true          # 为 IPv6 UDP 创建单独套接字
-dual_stack = true              # 启用双栈 (IPv4/IPv6)
-
-# 超时配置
-auth_timeout = "3s"            # 客户端认证超时
-task_negotiation_timeout = "3s" # 任务协商超时
-gc_interval = "10s"            # UDP 片段垃圾回收间隔
-gc_lifetime = "30s"            # UDP 片段保留时间
-stream_timeout = "60s"         # 流超时
-
-# 数据包配置
-max_external_packet_size = 1500 # 外部 UDP 数据包最大大小
-
-# ============================================
-# QUIC 配置
-# ============================================
-
-[quic]
-initial_mtu = 1200             # 初始 MTU
-min_mtu = 1200                 # 最小 MTU (至少 1200)
-gso = true                     # 启用通用分段卸载
-pmtu = true                    # 启用路径 MTU 发现
-send_window = 16777216         # 发送窗口大小 (字节)
-receive_window = 8388608       # 接收窗口大小 (字节)
-max_idle_time = "30s"          # 空闲连接超时
-
-# 拥塞控制配置
-[quic.congestion_control]
-controller = "bbr"             # 拥塞控制算法: bbr / cubic / new_reno
-initial_window = 1048576       # 初始拥塞窗口 (字节)
-
-# ============================================
-# 实验性功能
-# ============================================
-
-[experimental]
-drop_loopback = true           # 禁止连接到环回地址 (127.0.0.1, ::1) - 默认启用
-drop_private = true            # 禁止连接到私有地址 - 默认启用
-
-# 注意:
-# - server_port 和 zero_rtt_handshake 从控制面板 API 动态获取
-# - 大部分用户不需要修改这些配置，默认值已经过优化
-# - 路由配置请使用 ACL 配置文件 (acl.yaml)
-# - 如需允许连接到私有地址/环回地址，请将上述配置设为 false
-"#;
-
-		tokio::fs::write("config.toml.example", toml_config).await?;
-		warn!("Generated config.toml.example (TUIC server configuration)");
-
-		// Generate default ACL configuration with comments
-		let default_acl_config = r#"# ACL 配置文件
-# 此文件定义了流量路由规则
-
-# 定义出站连接类型
-outbounds:
-  # 直连出站（默认）
-  - name: default
-    type: direct
-    direct:
-      mode: auto  # 选项: auto (自动), 4 (仅 IPv4), 6 (仅 IPv6)
-
-  # SOCKS5 代理出站（示例，默认禁用）
-  # 取消注释以启用 SOCKS5 代理
-  # - name: proxy
-  #   type: socks5
-  #   socks5:
-  #     addr: 127.0.0.1:1080
-  #     username: user  # 可选，如需认证请填写
-  #     password: pass  # 可选，如需认证请填写
-  #     allow_udp: false
-
-# ACL 路由规则（按顺序匹配，首次匹配生效）
-acl:
-  inline:
-    # 默认规则：所有流量直连
-    # 这是无配置文件时的默认行为
-    - default(all)
-
-    # 更多规则示例（取消注释以启用）:
-
-    # 阻止 QUIC 协议（防止协议检测）
-    # - reject(all, udp/443)
-
-    # 阻止 SMTP 端口
-    # - reject(all, tcp/25)
-    # - reject(all, tcp/465)
-    # - reject(all, tcp/587)
-
-    # 通过代理路由特定域名
-    # - proxy(suffix:google.com)
-    # - proxy(suffix:youtube.com)
-    # - proxy(geosite:openai)
-    # - proxy(geosite:netflix)
-
-    # 私有网络直连
-    # - default(192.168.0.0/16)
-    # - default(10.0.0.0/8)
-    # - default(172.16.0.0/12)
-
-    # 中国大陆 IP 直连（需要 GeoIP 数据库）
-    # - default(geoip:cn)
-
-    # 特定域名走代理，仅 HTTPS
-    # - proxy(example.com, tcp/443)
-
-# 规则语法说明:
-#
-# 格式: outbound_name(matcher[, protocol/port])
-#
-# 地址匹配器:
-#   all 或 *              匹配所有地址
-#   1.2.3.4              单个 IP 地址
-#   192.168.0.0/16       CIDR 网段
-#   example.com          精确域名匹配
-#   *.example.com        通配符域名
-#   suffix:example.com   后缀匹配
-#   geoip:cn             GeoIP 国家代码
-#   geosite:google       GeoSite 分类
-#
-# 协议/端口过滤 (可选):
-#   tcp/80               TCP 端口 80
-#   udp/443              UDP 端口 443
-#   tcp/80-443           TCP 端口范围
-#   tcp                  所有 TCP
-#   udp                  所有 UDP
-#
-# 注意:
-#   - 规则按顺序匹配，首次匹配的规则生效
-#   - 最后一条规则应该是兜底规则（如 default(all)）
-#   - reject 类型会直接丢弃连接
-#   - GeoIP/GeoSite 功能需要配置相应的数据库文件
-"#;
-
-		tokio::fs::write("acl.yaml.example", default_acl_config).await?;
-		warn!("Generated acl.yaml.example (ACL routing configuration)");
-		warn!("");
-		warn!("Configuration files generated:");
-		warn!("  - config.toml.example: TUIC server configuration");
-		warn!("  - acl.yaml.example:    ACL routing rules");
-		warn!("");
-		warn!("To use:");
-		warn!("  1. Copy and rename: cp config.toml.example config.toml");
-		warn!("  2. Copy and rename: cp acl.yaml.example acl.yaml");
-		warn!("  3. Edit the files as needed");
-		warn!("  4. Run: tuic-server --node <ID> --ext_conf_file config.toml --acl_conf_file acl.yaml");
-		warn!("");
-		warn!("Or use default configuration (zero-config):");
-		warn!("  tuic-server --node <ID>");
+		tokio::fs::write("config.toml.example", include_bytes!("../examples/config.toml.example")).await?;
+		tokio::fs::write("acl.yaml.example", include_bytes!("../examples/acl.yaml.example")).await?;
+		warn!("Generated: config.toml.example, acl.yaml.example");
 		return Err(Control("Done").into());
 	}
 
@@ -607,8 +446,8 @@ mod tests {
 		assert_eq!(result.quic.initial_mtu, 1400);
 		assert_eq!(result.quic.min_mtu, 1300);
 		assert_eq!(result.quic.send_window, 10000000);
-		assert_eq!(result.quic.congestion_control.controller, CongestionController::Bbr);
-		assert_eq!(result.quic.congestion_control.initial_window, 2000000);
+		// congestion_control is now from API, not config file
+		assert_eq!(result.congestion_control, CongestionController::Bbr);
 
 		// Users are now fetched from panel API, not config file
 		// The users field in config is deprecated and ignored
@@ -700,17 +539,16 @@ mod tests {
 
 
 	#[tokio::test]
-	async fn test_congestion_control_variants() {
-		// Test BBR
+	async fn test_congestion_control_in_config_file_ignored() {
+		// congestion_control in config file is now ignored (fetched from API)
 		let config_bbr = include_str!("../tests/config/congestion_control_bbr.toml");
-
 		let result = test_parse_config(config_bbr).await.unwrap();
-		assert_eq!(result.quic.congestion_control.controller, CongestionController::Bbr);
+		// Default value since config file congestion_control is ignored
+		assert_eq!(result.congestion_control, CongestionController::Bbr);
 
-		// Test NewReno (note: lowercase 'newreno' is the valid variant)
 		let config_new_reno = include_str!("../tests/config/congestion_control_newreno.toml");
-
 		let result = test_parse_config(config_new_reno).await.unwrap();
-		assert_eq!(result.quic.congestion_control.controller, CongestionController::NewReno);
+		// Still default since config file value is ignored
+		assert_eq!(result.congestion_control, CongestionController::Bbr);
 	}
 }
