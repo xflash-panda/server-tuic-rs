@@ -11,7 +11,7 @@ use tonic::transport::Channel;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::AppContext;
+use crate::{AppContext, utils::CongestionController};
 
 /// State file name
 const STATE_FILE: &str = "state.json";
@@ -27,6 +27,8 @@ struct PanelState {
 	server_port:        Option<u16>,
 	/// Zero RTT handshake setting from API config
 	zero_rtt_handshake: Option<bool>,
+	/// Congestion control algorithm from API config
+	congestion_control: Option<String>,
 }
 
 fn get_hostname() -> String {
@@ -563,6 +565,7 @@ impl PanelService for Panel {
 		let mut need_fetch_config = true;
 		let mut server_port: u16 = 0;
 		let mut zero_rtt_handshake = false;
+		let mut congestion_control = CongestionController::default();
 		let mut node_id: i64 = 0;
 
 		if let Some(state) = self.load_state() {
@@ -578,13 +581,23 @@ impl PanelService for Panel {
 						if let (Some(port), Some(zero_rtt), Some(id)) =
 							(state.server_port, state.zero_rtt_handshake, state.node_id)
 						{
-							info!(
-								"Using cached config - server_port: {}, zero_rtt_handshake: {}, id: {}",
-								port, zero_rtt, id
-							);
 							server_port = port;
 							zero_rtt_handshake = zero_rtt;
 							node_id = id;
+							if let Some(cc_str) = &state.congestion_control {
+								match cc_str.parse::<CongestionController>() {
+									Ok(cc) => congestion_control = cc,
+									Err(_) => warn!(
+										"Unknown cached congestion control '{}', using default: {:?}",
+										cc_str, congestion_control
+									),
+								}
+							}
+							info!(
+								"Using cached config - server_port: {}, zero_rtt_handshake: {}, congestion_control: {:?}, id: \
+								 {}",
+								port, zero_rtt, congestion_control, id
+							);
 							need_fetch_config = false;
 						}
 					}
@@ -612,15 +625,25 @@ impl PanelService for Panel {
 			server_port = tuic_config.server_port;
 			zero_rtt_handshake = tuic_config.zero_rtt_handshake;
 			node_id = tuic_config.id;
+			if let Some(cc_str) = &tuic_config.server_congestion_control {
+				match cc_str.parse::<CongestionController>() {
+					Ok(cc) => congestion_control = cc,
+					Err(_) => warn!(
+						"Unknown congestion control '{}' from API, using default: {:?}",
+						cc_str, congestion_control
+					),
+				}
+			}
 			info!(
-				"Tuic config - server_port: {}, zero_rtt_handshake: {}, id: {}",
-				server_port, zero_rtt_handshake, node_id
+				"Tuic config - server_port: {}, zero_rtt_handshake: {}, congestion_control: {:?}, id: {}",
+				server_port, zero_rtt_handshake, congestion_control, node_id
 			);
 		}
 
 		// Update config with values from panel API or cache
 		cfg.server_port = server_port;
 		cfg.zero_rtt_handshake = zero_rtt_handshake;
+		cfg.congestion_control = congestion_control;
 
 		if need_register {
 			// Get hostname and register node
@@ -644,6 +667,7 @@ impl PanelService for Panel {
 				node_id:            Some(node_id),
 				server_port:        Some(server_port),
 				zero_rtt_handshake: Some(zero_rtt_handshake),
+				congestion_control: Some(format!("{:?}", congestion_control).to_lowercase()),
 			};
 			self.save_state(&state)?;
 		} else if need_fetch_config {
@@ -654,6 +678,7 @@ impl PanelService for Panel {
 				node_id: Some(node_id),
 				server_port: Some(server_port),
 				zero_rtt_handshake: Some(zero_rtt_handshake),
+				congestion_control: Some(format!("{:?}", congestion_control).to_lowercase()),
 			};
 			self.save_state(&state)?;
 		}

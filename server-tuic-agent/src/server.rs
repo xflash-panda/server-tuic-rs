@@ -60,25 +60,26 @@ impl Server {
 			.enable_segmentation_offload(ctx.cfg.quic.gso)
 			.mtu_discovery_config(if !ctx.cfg.quic.pmtu { None } else { Some(Default::default()) });
 
-		match ctx.cfg.quic.congestion_control.controller {
+		let initial_window = ctx.cfg.quic.initial_window;
+		match ctx.cfg.congestion_control {
 			CongestionController::Bbr => {
 				let mut bbr_config = BbrConfig::default();
-				bbr_config.initial_window(ctx.cfg.quic.congestion_control.initial_window);
+				bbr_config.initial_window(initial_window);
 				tp_cfg.congestion_controller_factory(Arc::new(bbr_config))
 			}
 			CongestionController::Cubic => {
 				let mut cubic_config = CubicConfig::default();
-				cubic_config.initial_window(ctx.cfg.quic.congestion_control.initial_window);
+				cubic_config.initial_window(initial_window);
 				tp_cfg.congestion_controller_factory(Arc::new(cubic_config))
 			}
 			CongestionController::NewReno => {
 				let mut new_reno = NewRenoConfig::default();
-				new_reno.initial_window(ctx.cfg.quic.congestion_control.initial_window);
+				new_reno.initial_window(initial_window);
 				tp_cfg.congestion_controller_factory(Arc::new(new_reno))
 			}
 			CongestionController::Bbr3 => {
 				let mut bbr3_config = Bbr3Config::default();
-				bbr3_config.initial_window(ctx.cfg.quic.congestion_control.initial_window);
+				bbr3_config.initial_window(initial_window);
 				tp_cfg.congestion_controller_factory(Arc::new(bbr3_config))
 			}
 		};

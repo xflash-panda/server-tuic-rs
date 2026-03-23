@@ -1,0 +1,9 @@
+outbounds:
+  - name: default
+    type: direct
+    direct:
+      mode: auto
+
+acl:
+  inline:
+    - default(all)
