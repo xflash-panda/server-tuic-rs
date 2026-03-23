@@ -994,7 +994,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.2",
  "tokio",
  "tower-service",
  "tracing",
@@ -1736,7 +1736,7 @@ dependencies = [
  "quinn-udp 0.5.14",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.2",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -1756,7 +1756,7 @@ dependencies = [
  "quinn-udp 0.6.0",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.2",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -1828,7 +1828,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.2",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -1840,7 +1840,7 @@ source = "git+https://github.com/Tipuch/quinn.git?branch=bbrv3#50ebb23e6007fdcfa
 dependencies = [
  "cfg_aliases",
  "libc",
- "socket2 0.5.10",
+ "socket2 0.6.2",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -2362,8 +2362,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "server-r-client"
+version = "0.1.11"
+source = "git+https://github.com/xflash-panda/server-r-client.git?tag=v0.1.11#9c86618ba6db662283afb29dd10e85fad509ce0b"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "server-tuic"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "acl-engine-r",
  "arc-swap",
@@ -2393,7 +2407,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "server-r-client",
+ "server-r-client 0.1.11",
  "socket2 0.6.2",
  "tempfile",
  "thiserror 2.0.18",
@@ -2561,7 +2575,7 @@ dependencies = [
 
 [[package]]
 name = "tests"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "aws-lc-rs",
  "eyre",
@@ -2570,7 +2584,7 @@ dependencies = [
  "lexopt",
  "rustls",
  "serial_test",
- "server-r-client",
+ "server-r-client 0.1.7",
  "server-tuic",
  "tokio",
  "tracing",
@@ -2708,9 +2722,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.49.0"
+version = "1.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72a2903cd7736441aac9df9d7688bd0ce48edccaadf181c3b90be801e81d3d86"
+checksum = "27ad5e34374e03cfffefc301becb44e9dc3c17584f414349ebe29ed26661822d"
 dependencies = [
  "bytes",
  "libc",
@@ -2983,7 +2997,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuic"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "bytes",
  "eyre",

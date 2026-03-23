@@ -7,10 +7,6 @@ initial_mtu = 1400
 min_mtu = 1300
 send_window = 10000000
 
-[quic.congestion_control]
-controller = "bbr"
-initial_window = 2000000
-
 [users]
 "123e4567-e89b-12d3-a456-426614174000" = 1
 "123e4567-e89b-12d3-a456-426614174001" = 2
