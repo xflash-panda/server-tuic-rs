@@ -40,6 +40,39 @@ impl Error {
 	pub fn is_trivial(&self) -> bool {
 		matches!(self, Self::TimedOut | Self::LocallyClosed)
 	}
+
+	pub fn is_auth_failed(&self) -> bool {
+		matches!(self, Self::AuthFailed(_))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use uuid::Uuid;
+
+	use super::*;
+
+	#[test]
+	fn test_is_auth_failed() {
+		let err = Error::AuthFailed(Uuid::nil());
+		assert!(err.is_auth_failed());
+	}
+
+	#[test]
+	fn test_is_auth_failed_false_for_other_errors() {
+		assert!(!Error::TimedOut.is_auth_failed());
+		assert!(!Error::LocallyClosed.is_auth_failed());
+		assert!(!Error::DuplicatedAuth.is_auth_failed());
+		assert!(!Error::TaskNegotiationTimeout.is_auth_failed());
+	}
+
+	#[test]
+	fn test_is_trivial() {
+		assert!(Error::TimedOut.is_trivial());
+		assert!(Error::LocallyClosed.is_trivial());
+		assert!(!Error::AuthFailed(Uuid::nil()).is_trivial());
+		assert!(!Error::DuplicatedAuth.is_trivial());
+	}
 }
 
 impl From<ConnectionError> for Error {
