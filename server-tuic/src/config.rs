@@ -257,6 +257,11 @@ pub struct ExperimentalConfig {
 	pub drop_loopback: bool,
 	#[educe(Default = true)]
 	pub drop_private:  bool,
+	/// Anti-probe defense: send fake HTTP/3 SETTINGS frame on new connections
+	/// and delay closing on auth failure, making the server appear as a normal
+	/// HTTP/3 server to active probing tools.
+	#[educe(Default = true)]
+	pub anti_probe:    bool,
 }
 
 impl Config {
@@ -556,6 +561,37 @@ mod tests {
 		assert_eq!(result.gc_interval, Duration::from_secs(30));
 		assert_eq!(result.gc_lifetime, Duration::from_secs(60));
 		assert_eq!(result.stream_timeout, Duration::from_secs(120));
+	}
+
+
+	#[test]
+	fn test_experimental_config_anti_probe_defaults_true() {
+		let config = ExperimentalConfig::default();
+		assert!(config.anti_probe, "anti_probe should default to true");
+		assert!(config.drop_loopback);
+		assert!(config.drop_private);
+	}
+
+	#[tokio::test]
+	async fn test_anti_probe_config_from_toml() {
+		let config = test_parse_config(
+			r#"
+[experimental]
+anti_probe = false
+"#,
+		)
+		.await
+		.unwrap();
+		assert!(!config.experimental.anti_probe);
+	}
+
+	#[tokio::test]
+	async fn test_anti_probe_config_default_when_omitted() {
+		let config = test_parse_config("").await.unwrap();
+		assert!(
+			config.experimental.anti_probe,
+			"anti_probe should default to true when not specified"
+		);
 	}
 
 	#[tokio::test]
