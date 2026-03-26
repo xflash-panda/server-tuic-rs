@@ -346,8 +346,11 @@ impl AclEngine {
 	/// Match a host against ACL rules
 	pub fn match_host(&self, host: &str, port: u16, protocol: Protocol) -> Option<Arc<OutboundHandler>> {
 		// Create HostInfo from domain or IP
-		let host_info = if host.parse::<std::net::IpAddr>().is_ok() {
-			acl_engine_r::HostInfo::new("", Some(host.parse().unwrap()), None)
+		let host_info = if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+			match ip {
+				std::net::IpAddr::V4(v4) => acl_engine_r::HostInfo::new("", Some(v4), None),
+				std::net::IpAddr::V6(v6) => acl_engine_r::HostInfo::new("", None, Some(v6)),
+			}
 		} else {
 			acl_engine_r::HostInfo::from_name(host)
 		};
@@ -525,6 +528,44 @@ acl:
 		let result = engine.match_host("example.com", 80, Protocol::TCP);
 		assert!(result.is_some());
 		assert!(matches!(result.unwrap().as_ref(), OutboundHandler::Direct(_)));
+	}
+
+	/// Test match_host with IPv4 and IPv6 addresses (regression: IPv6 caused
+	/// panic)
+	#[tokio::test]
+	async fn test_match_host_with_ip_addresses() {
+		let temp_dir = tempfile::tempdir().unwrap();
+		let config = AclConfig {
+			outbounds: vec![OutboundEntry {
+				name:          "direct".to_string(),
+				outbound_type: "direct".to_string(),
+				config:        OutboundEntryConfig::Direct {
+					direct: Some(DirectConfig {
+						mode: IpMode::Auto,
+						..Default::default()
+					}),
+				},
+			}],
+			acl:       AclRules {
+				inline: vec!["direct(all)".to_string()],
+			},
+		};
+
+		let engine = AclEngine::new(config, temp_dir.path(), false)
+			.await
+			.expect("Failed to create ACL engine");
+
+		// IPv4 should not panic
+		let result = engine.match_host("1.1.1.1", 443, Protocol::TCP);
+		assert!(result.is_some(), "IPv4 address should match");
+
+		// IPv6 should not panic (this was the bug: unwrap on Ipv4Addr parse of IPv6)
+		let result = engine.match_host("2606:4700:4700::1111", 443, Protocol::TCP);
+		assert!(result.is_some(), "IPv6 address should match");
+
+		// IPv6 loopback
+		let result = engine.match_host("::1", 80, Protocol::TCP);
+		assert!(result.is_some(), "IPv6 loopback should match");
 	}
 
 	#[test]
