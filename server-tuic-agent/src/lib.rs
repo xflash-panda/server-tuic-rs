@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 pub mod acl;
 pub mod config;
+pub mod congestion;
 pub mod connection;
 pub mod error;
 pub mod io;

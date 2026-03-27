@@ -28,6 +28,7 @@ moka = { version = "0.12", features = ["future"] }
 
 # QUIC
 quinn = { workspace = true, default-features = false, features = ["runtime-tokio", "qlog"] }
+quinn-proto = { workspace = true }
 quinn-congestions = { workspace = true }
 
 # Core
