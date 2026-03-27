@@ -21,7 +21,6 @@ mod handle_task;
 mod udp_session;
 
 pub const ERROR_CODE: VarInt = VarInt::from_u32(0);
-pub const INIT_CONCURRENT_STREAMS: u32 = 32;
 
 #[derive(Clone)]
 pub struct Connection {
@@ -108,6 +107,8 @@ impl Connection {
 	}
 
 	fn new(ctx: Arc<AppContext>, conn: QuinnConnection) -> Self {
+		let init_uni = ctx.cfg.quic.max_concurrent_uni_streams;
+		let init_bidi = ctx.cfg.quic.max_concurrent_bidi_streams;
 		Self {
 			ctx,
 			inner: conn.clone(),
@@ -117,8 +118,8 @@ impl Connection {
 			udp_relay_mode: Arc::new(ArcSwap::new(None.into())),
 			remote_uni_stream_cnt: Counter::new(),
 			remote_bi_stream_cnt: Counter::new(),
-			max_concurrent_uni_streams: Arc::new(AtomicU32::new(INIT_CONCURRENT_STREAMS)),
-			max_concurrent_bi_streams: Arc::new(AtomicU32::new(INIT_CONCURRENT_STREAMS)),
+			max_concurrent_uni_streams: Arc::new(AtomicU32::new(init_uni)),
+			max_concurrent_bi_streams: Arc::new(AtomicU32::new(init_bidi)),
 		}
 	}
 
