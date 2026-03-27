@@ -225,6 +225,16 @@ pub struct QuicConfig {
 	#[deprecated]
 	pub __congestion_control: Option<IgnoredAny>,
 
+	/// Initial max concurrent unidirectional streams
+	/// Default 3 mimics HTTP/3 (QPACK encoder/decoder + control stream)
+	#[educe(Default = 3)]
+	pub max_concurrent_uni_streams: u32,
+
+	/// Initial max concurrent bidirectional streams
+	/// Default 100 mimics typical HTTP/3 servers
+	#[educe(Default = 100)]
+	pub max_concurrent_bidi_streams: u32,
+
 	#[educe(Default = 1048576)]
 	pub initial_window: u64,
 
@@ -571,6 +581,33 @@ anti_probe = false
 			config.experimental.anti_probe,
 			"anti_probe should default to true when not specified"
 		);
+	}
+
+	#[tokio::test]
+	async fn test_default_stream_limits_not_tuic_fingerprint() {
+		// TUIC's known fingerprint is max_concurrent_uni_streams=32,
+		// max_concurrent_bidi_streams=32 Our defaults MUST NOT match this to avoid
+		// GFW detection
+		let config = test_parse_config("").await.unwrap();
+		assert_ne!(
+			config.quic.max_concurrent_uni_streams, 32,
+			"default uni streams must not be 32 (TUIC fingerprint)"
+		);
+		assert_ne!(
+			config.quic.max_concurrent_bidi_streams, 32,
+			"default bidi streams must not be 32 (TUIC fingerprint)"
+		);
+		// Values should be reasonable (> 0, power-of-two-ish)
+		assert!(config.quic.max_concurrent_uni_streams > 0);
+		assert!(config.quic.max_concurrent_bidi_streams > 0);
+	}
+
+	#[tokio::test]
+	async fn test_custom_stream_limits_from_config() {
+		let config = include_str!("../tests/config/custom_stream_limits.toml");
+		let result = test_parse_config(config).await.unwrap();
+		assert_eq!(result.quic.max_concurrent_uni_streams, 128);
+		assert_eq!(result.quic.max_concurrent_bidi_streams, 64);
 	}
 
 	#[tokio::test]
