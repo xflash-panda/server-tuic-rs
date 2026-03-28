@@ -44,6 +44,12 @@ impl Error {
 	pub fn is_auth_failed(&self) -> bool {
 		matches!(self, Self::AuthFailed(_))
 	}
+
+	/// Whether this error should be silently dropped (no connection close) when
+	/// anti_probe is enabled. Mimics H3 server ignoring unknown stream types.
+	pub fn should_silent_drop_for_anti_probe(&self) -> bool {
+		matches!(self, Self::AuthFailed(_) | Self::DuplicatedAuth)
+	}
 }
 
 impl From<ConnectionError> for Error {
@@ -82,5 +88,29 @@ mod tests {
 		assert!(Error::LocallyClosed.is_trivial());
 		assert!(!Error::AuthFailed(Uuid::nil()).is_trivial());
 		assert!(!Error::DuplicatedAuth.is_trivial());
+	}
+
+	#[test]
+	fn test_should_silent_drop_for_anti_probe_auth_failed() {
+		let err = Error::AuthFailed(Uuid::nil());
+		assert!(
+			err.should_silent_drop_for_anti_probe(),
+			"AuthFailed should be silently dropped when anti_probe is enabled"
+		);
+	}
+
+	#[test]
+	fn test_should_silent_drop_for_anti_probe_duplicated_auth() {
+		assert!(
+			Error::DuplicatedAuth.should_silent_drop_for_anti_probe(),
+			"DuplicatedAuth should be silently dropped when anti_probe is enabled"
+		);
+	}
+
+	#[test]
+	fn test_should_not_silent_drop_for_other_errors() {
+		assert!(!Error::TimedOut.should_silent_drop_for_anti_probe());
+		assert!(!Error::LocallyClosed.should_silent_drop_for_anti_probe());
+		assert!(!Error::TaskNegotiationTimeout.should_silent_drop_for_anti_probe());
 	}
 }

@@ -68,14 +68,34 @@ impl Connection {
 			Ok(Task::Dissociate(assoc_id)) => self.handle_dissociate(assoc_id).await,
 			Ok(_) => unreachable!(), // already filtered in `tuic_quinn`
 			Err(err) => {
-				if self.ctx.cfg.experimental.anti_probe && self.is_probe_error(&err) {
-					debug!(
-						"[{id:#010x}] [{addr}] [anti-probe] detected non-TUIC probe, sending H3 response",
-						id = self.id(),
-						addr = self.inner.remote_address(),
-					);
-					anti_probe::send_h3_probe_response(&self.inner).await;
-					self.close();
+				if self.ctx.cfg.experimental.anti_probe {
+					if self.is_probe_error(&err) {
+						debug!(
+							"[{id:#010x}] [{addr}] [anti-probe] detected non-TUIC probe on uni stream",
+							id = self.id(),
+							addr = self.inner.remote_address(),
+						);
+						// Uni streams (control + QPACK) already sent
+						// proactively at connection setup. Don't close —
+						// let auth timeout close naturally, like a real H3
+						// server.
+					} else if err.should_silent_drop_for_anti_probe() {
+						debug!(
+							"[{id:#010x}] [{addr}] [anti-probe] silently dropping error: {err}",
+							id = self.id(),
+							addr = self.inner.remote_address(),
+						);
+						// Mimic H3 server ignoring unknown stream type — don't
+						// close connection.
+					} else {
+						debug!(
+							"[{id:#010x}] [{addr}] [{user}] handling incoming unidirectional stream error: {err}",
+							id = self.id(),
+							addr = self.inner.remote_address(),
+							user = self.auth,
+						);
+						self.close();
+					}
 				} else {
 					debug!(
 						"[{id:#010x}] [{addr}] [{user}] handling incoming unidirectional stream error: {err}",
