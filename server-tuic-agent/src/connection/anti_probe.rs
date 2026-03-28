@@ -1,7 +1,5 @@
 use rand::{Rng, prelude::IndexedRandom};
 use tracing::debug;
-use tuic::VERSION as TUIC_VERSION;
-
 /// Encode a u64 value as a QUIC variable-length integer (RFC 9000 Section 16).
 fn encode_varint(buf: &mut Vec<u8>, value: u64) {
 	if value <= 63 {
@@ -66,11 +64,6 @@ fn build_qpack_encoder_stream() -> Vec<u8> {
 /// Build an H3 QPACK decoder stream (stream type 0x03).
 fn build_qpack_decoder_stream() -> Vec<u8> {
 	vec![0x03]
-}
-
-/// Returns true if the first byte indicates TUIC protocol.
-pub fn is_tuic_protocol(first_byte: u8) -> bool {
-	first_byte == TUIC_VERSION
 }
 
 /// Send an H3 probe response by opening control + QPACK uni streams.
@@ -138,6 +131,10 @@ mod tests {
 			!all_identical,
 			"10 calls to build_h3_control_stream should not all produce identical output"
 		);
+	}
+
+	fn is_tuic_protocol(first_byte: u8) -> bool {
+		first_byte == tuic::VERSION
 	}
 
 	#[test]
