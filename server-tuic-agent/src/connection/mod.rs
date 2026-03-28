@@ -241,14 +241,13 @@ impl Connection {
 		false
 	}
 
-	/// Check if an error indicates a non-TUIC protocol probe (bi stream)
-	fn is_probe_error_bi(&self, err: &Error) -> bool {
-		if let Error::Model(model_err) = err {
-			return matches!(
-				model_err,
-				tuic::quinn::Error::UnmarshalBiStream(tuic::UnmarshalError::InvalidVersion(_), _, _)
-			);
+	/// Try to extract the SendStream from a bi stream probe error.
+	/// Consumes the error on success, returns it on failure.
+	fn try_extract_probe_bi_send(err: Error) -> Result<quinn::SendStream, Error> {
+		if let Error::Model(tuic::quinn::Error::UnmarshalBiStream(tuic::UnmarshalError::InvalidVersion(_), send, _)) = err {
+			Ok(send)
+		} else {
+			Err(err)
 		}
-		false
 	}
 }

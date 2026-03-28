@@ -135,14 +135,32 @@ impl Connection {
 			Ok(Task::Connect(conn)) => self.handle_connect(conn).await,
 			Ok(_) => unreachable!(), // already filtered in `tuic_quinn`
 			Err(err) => {
-				if self.ctx.cfg.experimental.anti_probe && self.is_probe_error_bi(&err) {
-					debug!(
-						"[{id:#010x}] [{addr}] [anti-probe] detected non-TUIC probe, sending H3 response",
-						id = self.id(),
-						addr = self.inner.remote_address(),
-					);
-					anti_probe::send_h3_probe_response(&self.inner).await;
-					self.close();
+				if self.ctx.cfg.experimental.anti_probe {
+					match Connection::try_extract_probe_bi_send(err) {
+						Ok(mut send) => {
+							debug!(
+								"[{id:#010x}] [{addr}] [anti-probe] detected non-TUIC probe on bidi stream, sending H3 404 \
+								 response",
+								id = self.id(),
+								addr = self.inner.remote_address(),
+							);
+							// Respond with H3 404 on the same bidi stream (like a real HTTP/3 server)
+							// Uni streams (control + QPACK) were already sent proactively at connection
+							// setup
+							anti_probe::send_h3_bidi_response(&mut send).await;
+							// Don't close — let auth timeout close naturally,
+							// like a real server
+						}
+						Err(err) => {
+							debug!(
+								"[{id:#010x}] [{addr}] [{user}] handling incoming bidirectional stream error: {err}",
+								id = self.id(),
+								addr = self.inner.remote_address(),
+								user = self.auth,
+							);
+							self.close();
+						}
+					}
 				} else {
 					debug!(
 						"[{id:#010x}] [{addr}] [{user}] handling incoming bidirectional stream error: {err}",
