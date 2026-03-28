@@ -107,8 +107,8 @@ impl Connection {
 	}
 
 	fn new(ctx: Arc<AppContext>, conn: QuinnConnection) -> Self {
-		let init_uni = ctx.cfg.quic.max_concurrent_uni_streams;
-		let init_bidi = ctx.cfg.quic.max_concurrent_bidi_streams;
+		let init_uni = ctx.cfg.experimental.max_concurrent_uni_streams();
+		let init_bidi = ctx.cfg.experimental.max_concurrent_bidi_streams();
 		Self {
 			ctx,
 			inner: conn.clone(),

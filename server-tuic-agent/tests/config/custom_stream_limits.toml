@@ -1,3 +1,0 @@
-[quic]
-max_concurrent_uni_streams = 128
-max_concurrent_bidi_streams = 64
