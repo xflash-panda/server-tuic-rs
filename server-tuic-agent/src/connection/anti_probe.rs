@@ -1,72 +1,99 @@
-//! Anti-probe defense module
-//!
-//! Generates fake HTTP/3 frames to disguise the TUIC server as an HTTP/3
-//! server, preventing active probing tools from identifying the protocol.
+use rand::{Rng, prelude::IndexedRandom};
+use tracing::debug;
+/// Encode a u64 value as a QUIC variable-length integer (RFC 9000 Section 16).
+fn encode_varint(buf: &mut Vec<u8>, value: u64) {
+	if value <= 63 {
+		buf.push(value as u8);
+	} else if value <= 16383 {
+		buf.push(((value >> 8) as u8) | 0x40);
+		buf.push(value as u8);
+	} else if value <= 1_073_741_823 {
+		let bytes = (value as u32).to_be_bytes();
+		buf.push(bytes[0] | 0x80);
+		buf.extend_from_slice(&bytes[1..]);
+	} else {
+		let bytes = value.to_be_bytes();
+		buf.push(bytes[0] | 0xc0);
+		buf.extend_from_slice(&bytes[1..]);
+	}
+}
 
-/// HTTP/3 Control Stream type
-const H3_STREAM_TYPE_CONTROL: u8 = 0x00;
+/// Build an H3 control stream: stream type 0x00 + SETTINGS frame with
+/// randomized values.
+fn build_h3_control_stream() -> Vec<u8> {
+	let mut rng = rand::rng();
 
-/// HTTP/3 SETTINGS frame type
-const H3_FRAME_TYPE_SETTINGS: u8 = 0x04;
+	// Randomize setting values
+	let capacity_choices = [0u64, 4096, 16384, 65536];
+	let capacity = *capacity_choices.choose(&mut rng).unwrap();
 
-/// HTTP/3 GOAWAY frame type
-const H3_FRAME_TYPE_GOAWAY: u8 = 0x07;
+	let field_section_size = rng.random_range(8192u64..=65536);
 
-/// Build a fake HTTP/3 SETTINGS frame payload for a server-initiated
-/// uni-stream.
-///
-/// The probe tool reads the first byte of server-initiated uni-streams:
-/// - If first byte is `0x04` (SETTINGS frame type) → concludes "Not TUIC"
-/// - If first byte is `0x05` (TUIC version) → concludes "TUIC detected"
-///
-/// We send the SETTINGS frame type directly (not prefixed with control stream
-/// type) because the probe checks `buf[0] == 0x04`.
-///
-/// Returns bytes that look like a minimal HTTP/3 SETTINGS frame.
-pub fn build_h3_settings_frame() -> Vec<u8> {
-	// HTTP/3 SETTINGS frame:
-	// - Frame type: 0x04
-	// - Frame length: variable-length integer (number of settings bytes)
-	// - Settings: key-value pairs as variable-length integers
-	//
-	// We include realistic settings that a real HTTP/3 server would send:
-	// - SETTINGS_MAX_FIELD_SECTION_SIZE (0x06) = 16384
-	// - SETTINGS_QPACK_MAX_TABLE_CAPACITY (0x01) = 0
-	// - SETTINGS_QPACK_BLOCKED_STREAMS (0x07) = 0
-	let mut buf = Vec::with_capacity(16);
+	let blocked_streams_choices = [0u64, 10, 16, 100, 128];
+	let blocked_streams = *blocked_streams_choices.choose(&mut rng).unwrap();
 
-	// Control stream type (0x00) - this is what a real HTTP/3 server sends first
-	buf.push(H3_STREAM_TYPE_CONTROL);
+	// Build settings payload: pairs of (setting_id, value) as varints
+	let mut settings_payload = Vec::new();
+	// QPACK_MAX_TABLE_CAPACITY (0x01)
+	encode_varint(&mut settings_payload, 0x01);
+	encode_varint(&mut settings_payload, capacity);
+	// MAX_FIELD_SECTION_SIZE (0x06)
+	encode_varint(&mut settings_payload, 0x06);
+	encode_varint(&mut settings_payload, field_section_size);
+	// QPACK_BLOCKED_STREAMS (0x07)
+	encode_varint(&mut settings_payload, 0x07);
+	encode_varint(&mut settings_payload, blocked_streams);
 
-	// SETTINGS frame
-	buf.push(H3_FRAME_TYPE_SETTINGS); // frame type
-	buf.push(0x09); // frame length: 9 bytes
-
-	// SETTINGS_QPACK_MAX_TABLE_CAPACITY (0x01) = 0
-	buf.push(0x01);
+	let mut buf = Vec::new();
+	// Stream type: control (0x00)
 	buf.push(0x00);
-
-	// SETTINGS_QPACK_BLOCKED_STREAMS (0x07) = 0
-	buf.push(0x07);
-	buf.push(0x00);
-
-	// SETTINGS_MAX_FIELD_SECTION_SIZE (0x06) = 16384 (0x4000 in variable-length int
-	// = 0x80, 0x00, 0x40, 0x00) Actually use simple 2-byte encoding: 0x40, 0x00
-	// means 16384 in QUIC varint
-	buf.push(0x06);
-	buf.extend_from_slice(&[0x80, 0x00, 0x40, 0x00]); // 16384 as 4-byte varint
+	// SETTINGS frame type (0x04)
+	encode_varint(&mut buf, 0x04);
+	// SETTINGS frame length
+	encode_varint(&mut buf, settings_payload.len() as u64);
+	buf.extend_from_slice(&settings_payload);
 
 	buf
 }
 
-/// Build a fake HTTP/3 GOAWAY frame.
-/// Sent before closing connection to mimic HTTP/3 graceful shutdown.
-pub fn build_h3_goaway_frame() -> Vec<u8> {
-	let mut buf = Vec::with_capacity(4);
-	buf.push(H3_FRAME_TYPE_GOAWAY); // frame type
-	buf.push(0x01); // frame length: 1 byte
-	buf.push(0x00); // stream id: 0
-	buf
+/// Build an H3 QPACK encoder stream (stream type 0x02).
+fn build_qpack_encoder_stream() -> Vec<u8> {
+	vec![0x02]
+}
+
+/// Build an H3 QPACK decoder stream (stream type 0x03).
+fn build_qpack_decoder_stream() -> Vec<u8> {
+	vec![0x03]
+}
+
+/// Send an H3 probe response by opening control + QPACK uni streams.
+pub async fn send_h3_probe_response(conn: &quinn::Connection) {
+	let control = build_h3_control_stream();
+	let encoder = build_qpack_encoder_stream();
+	let decoder = build_qpack_decoder_stream();
+
+	let send_stream = |data: Vec<u8>, name: &'static str| {
+		let conn = conn.clone();
+		async move {
+			match conn.open_uni().await {
+				Ok(mut stream) => {
+					if let Err(e) = stream.write_all(&data).await {
+						debug!("anti-probe: failed to write {name} stream: {e}");
+					}
+					// Don't finish the stream — real H3 servers keep them open
+				}
+				Err(e) => {
+					debug!("anti-probe: failed to open {name} uni stream: {e}");
+				}
+			}
+		}
+	};
+
+	tokio::join!(
+		send_stream(control, "control"),
+		send_stream(encoder, "qpack-encoder"),
+		send_stream(decoder, "qpack-decoder"),
+	);
 }
 
 #[cfg(test)]
@@ -74,67 +101,92 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn test_h3_settings_frame_starts_with_control_stream_type() {
-		let frame = build_h3_settings_frame();
-		assert!(!frame.is_empty());
-		// First byte should be H3 control stream type (0x00)
-		assert_eq!(
-			frame[0], H3_STREAM_TYPE_CONTROL,
-			"first byte must be control stream type 0x00"
-		);
+	fn test_qpack_encoder_stream_bytes() {
+		assert_eq!(build_qpack_encoder_stream(), vec![0x02]);
 	}
 
 	#[test]
-	fn test_h3_settings_frame_contains_settings_type() {
-		let frame = build_h3_settings_frame();
-		// Second byte should be SETTINGS frame type (0x04)
-		assert_eq!(
-			frame[1], H3_FRAME_TYPE_SETTINGS,
-			"second byte must be SETTINGS frame type 0x04"
-		);
+	fn test_qpack_decoder_stream_bytes() {
+		assert_eq!(build_qpack_decoder_stream(), vec![0x03]);
 	}
 
 	#[test]
-	fn test_h3_settings_frame_not_tuic_version() {
-		let frame = build_h3_settings_frame();
-		// First byte must NOT be TUIC version (0x05)
-		assert_ne!(frame[0], 0x05, "first byte must not be TUIC version byte");
+	fn test_h3_control_stream_starts_with_type() {
+		let bytes = build_h3_control_stream();
+		assert_eq!(bytes[0], 0x00, "first byte should be control stream type");
+		assert_eq!(bytes[1], 0x04, "second byte should be SETTINGS frame type");
 	}
 
 	#[test]
-	fn test_h3_settings_frame_has_valid_length() {
-		let frame = build_h3_settings_frame();
-		// Should have: control_type(1) + frame_type(1) + length(1) + settings_payload
+	fn test_h3_control_stream_contains_settings() {
+		let bytes = build_h3_control_stream();
+		assert!(bytes.len() >= 4, "control stream should have at least 4 bytes");
+	}
+
+	#[test]
+	fn test_settings_values_randomized() {
+		let results: Vec<Vec<u8>> = (0..10).map(|_| build_h3_control_stream()).collect();
+		let all_identical = results.windows(2).all(|w| w[0] == w[1]);
 		assert!(
-			frame.len() >= 4,
-			"frame must have at least control type + frame type + length + payload"
-		);
-
-		// Verify declared length matches actual payload
-		let declared_len = frame[2] as usize;
-		let actual_payload = frame.len() - 3; // skip control_type + frame_type + length byte
-		assert_eq!(
-			declared_len, actual_payload,
-			"declared frame length must match actual payload size"
+			!all_identical,
+			"10 calls to build_h3_control_stream should not all produce identical output"
 		);
 	}
 
-	#[test]
-	fn test_h3_settings_frame_contains_known_settings() {
-		let frame = build_h3_settings_frame();
-		// Should contain QPACK_MAX_TABLE_CAPACITY setting id (0x01)
-		assert!(frame.contains(&0x01), "should contain QPACK_MAX_TABLE_CAPACITY setting");
-		// Should contain QPACK_BLOCKED_STREAMS setting id (0x07)
-		assert!(frame.contains(&0x07), "should contain QPACK_BLOCKED_STREAMS setting");
-		// Should contain MAX_FIELD_SECTION_SIZE setting id (0x06)
-		assert!(frame.contains(&0x06), "should contain MAX_FIELD_SECTION_SIZE setting");
+	fn is_tuic_protocol(first_byte: u8) -> bool {
+		first_byte == tuic::VERSION
 	}
 
 	#[test]
-	fn test_h3_goaway_frame_structure() {
-		let frame = build_h3_goaway_frame();
-		assert_eq!(frame[0], H3_FRAME_TYPE_GOAWAY, "first byte must be GOAWAY frame type");
-		assert_eq!(frame[1], 0x01, "length should be 1");
-		assert_eq!(frame[2], 0x00, "stream id should be 0");
+	fn test_is_tuic_version() {
+		assert!(is_tuic_protocol(0x05));
+		assert!(!is_tuic_protocol(0x00));
+		assert!(!is_tuic_protocol(0x04));
+		assert!(!is_tuic_protocol(0xFF));
+	}
+
+	#[test]
+	fn test_encode_varint_1byte() {
+		let mut buf = Vec::new();
+		encode_varint(&mut buf, 37);
+		assert_eq!(buf, vec![37]);
+	}
+
+	#[test]
+	fn test_encode_varint_2byte() {
+		let mut buf = Vec::new();
+		encode_varint(&mut buf, 15293);
+		assert_eq!(buf, vec![0x7b, 0xbd]);
+	}
+
+	#[test]
+	fn test_encode_varint_zero() {
+		let mut buf = Vec::new();
+		encode_varint(&mut buf, 0);
+		assert_eq!(buf, vec![0x00]);
+	}
+
+	#[test]
+	fn test_encode_varint_max_1byte() {
+		let mut buf = Vec::new();
+		encode_varint(&mut buf, 63);
+		assert_eq!(buf, vec![63]);
+	}
+
+	#[test]
+	fn test_encode_varint_min_2byte() {
+		let mut buf = Vec::new();
+		encode_varint(&mut buf, 64);
+		assert_eq!(buf, vec![0x40, 0x40]);
+	}
+
+	#[test]
+	fn test_h3_control_stream_valid_structure() {
+		let bytes = build_h3_control_stream();
+		assert!(
+			bytes.len() >= 9,
+			"control stream with 3 settings should be at least 9 bytes, got {}",
+			bytes.len()
+		);
 	}
 }

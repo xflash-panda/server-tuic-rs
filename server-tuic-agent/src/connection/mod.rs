@@ -15,7 +15,7 @@ use uuid::Uuid;
 use self::{authenticated::Authenticated, udp_session::UdpSession};
 use crate::{AppContext, UserConnections, error::Error, utils::UdpRelayMode};
 
-pub mod anti_probe;
+mod anti_probe;
 mod authenticated;
 mod handle_stream;
 mod handle_task;
@@ -114,8 +114,8 @@ impl Connection {
 	}
 
 	fn new(ctx: Arc<AppContext>, conn: QuinnConnection) -> Self {
-		let init_uni = ctx.cfg.quic.max_concurrent_uni_streams;
-		let init_bidi = ctx.cfg.quic.max_concurrent_bidi_streams;
+		let init_uni = ctx.cfg.experimental.max_concurrent_uni_streams();
+		let init_bidi = ctx.cfg.experimental.max_concurrent_bidi_streams();
 		Self {
 			ctx,
 			inner: conn.clone(),
@@ -213,32 +213,9 @@ impl Connection {
 		}
 	}
 
-	/// Send a fake HTTP/3 SETTINGS frame on a server-initiated uni-stream.
-	/// This makes the server appear as an HTTP/3 server to active probing
-	/// tools.
+	/// Send fake HTTP/3 streams (control + QPACK) to disguise as HTTP/3 server.
 	async fn send_fake_h3_settings(self) {
-		let frame = anti_probe::build_h3_settings_frame();
-		match self.inner.open_uni().await {
-			Ok(mut send) => {
-				if let Err(e) = send.write_all(&frame).await {
-					debug!(
-						"[{id:#010x}] [anti-probe] failed to write fake H3 SETTINGS: {e}",
-						id = self.id(),
-					);
-					return;
-				}
-				// Don't finish the stream - keep it open like a real HTTP/3 control stream
-				// The control stream stays open for the lifetime of the connection
-				// Hold it until connection closes
-				let _ = self.inner.closed().await;
-			}
-			Err(e) => {
-				debug!(
-					"[{id:#010x}] [anti-probe] failed to open uni-stream for fake H3 SETTINGS: {e}",
-					id = self.id(),
-				);
-			}
-		}
+		anti_probe::send_h3_probe_response(&self.inner).await;
 	}
 
 	fn id(&self) -> u32 {
@@ -251,5 +228,27 @@ impl Connection {
 
 	fn close(&self) {
 		self.inner.close(ERROR_CODE, &[]);
+	}
+
+	/// Check if an error indicates a non-TUIC protocol probe (uni stream)
+	fn is_probe_error(&self, err: &Error) -> bool {
+		if let Error::Model(model_err) = err {
+			return matches!(
+				model_err,
+				tuic::quinn::Error::UnmarshalUniStream(tuic::UnmarshalError::InvalidVersion(_), _)
+			);
+		}
+		false
+	}
+
+	/// Check if an error indicates a non-TUIC protocol probe (bi stream)
+	fn is_probe_error_bi(&self, err: &Error) -> bool {
+		if let Error::Model(model_err) = err {
+			return matches!(
+				model_err,
+				tuic::quinn::Error::UnmarshalBiStream(tuic::UnmarshalError::InvalidVersion(_), _, _)
+			);
+		}
+		false
 	}
 }

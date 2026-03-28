@@ -225,16 +225,6 @@ pub struct QuicConfig {
 	#[deprecated]
 	pub __congestion_control: Option<IgnoredAny>,
 
-	/// Initial max concurrent unidirectional streams
-	/// Default 3 mimics HTTP/3 (QPACK encoder/decoder + control stream)
-	#[educe(Default = 3)]
-	pub max_concurrent_uni_streams: u32,
-
-	/// Initial max concurrent bidirectional streams
-	/// Default 100 mimics typical HTTP/3 servers
-	#[educe(Default = 100)]
-	pub max_concurrent_bidi_streams: u32,
-
 	#[educe(Default = 1048576)]
 	pub initial_window: u64,
 
@@ -265,15 +255,40 @@ pub struct QuicConfig {
 #[educe(Default)]
 #[serde(default)]
 pub struct ExperimentalConfig {
+	/// Anti-probe defense: use anti-fingerprint QUIC stream limits,
+	/// send fake HTTP/3 SETTINGS frame on new connections,
+	/// and respond with H3 frames to non-TUIC probes.
+	#[educe(Default = true)]
+	pub anti_probe:    bool,
 	#[educe(Default = true)]
 	pub drop_loopback: bool,
 	#[educe(Default = true)]
 	pub drop_private:  bool,
-	/// Anti-probe defense: send fake HTTP/3 SETTINGS frame on new connections
-	/// and delay closing on auth failure, making the server appear as a normal
-	/// HTTP/3 server to active probing tools.
-	#[educe(Default = true)]
-	pub anti_probe:    bool,
+}
+
+impl ExperimentalConfig {
+	/// Anti-fingerprint: mimics typical HTTP/3 server
+	const ANTI_CONCURRENT_BIDI_STREAMS: u32 = 100;
+	/// Anti-fingerprint: mimics HTTP/3 QPACK encoder/decoder + control stream
+	const ANTI_CONCURRENT_UNI_STREAMS: u32 = 3;
+	/// TUIC original stream limits
+	const DEFAULT_CONCURRENT_STREAMS: u32 = 32;
+
+	pub fn max_concurrent_uni_streams(&self) -> u32 {
+		if self.anti_probe {
+			Self::ANTI_CONCURRENT_UNI_STREAMS
+		} else {
+			Self::DEFAULT_CONCURRENT_STREAMS
+		}
+	}
+
+	pub fn max_concurrent_bidi_streams(&self) -> u32 {
+		if self.anti_probe {
+			Self::ANTI_CONCURRENT_BIDI_STREAMS
+		} else {
+			Self::DEFAULT_CONCURRENT_STREAMS
+		}
+	}
 }
 
 impl Config {
@@ -554,11 +569,34 @@ mod tests {
 
 
 	#[test]
-	fn test_experimental_config_anti_probe_defaults_true() {
-		let config = ExperimentalConfig::default();
-		assert!(config.anti_probe, "anti_probe should default to true");
-		assert!(config.drop_loopback);
-		assert!(config.drop_private);
+	fn test_anti_probe_enabled_uses_anti_fingerprint_values() {
+		let exp = ExperimentalConfig {
+			anti_probe: true,
+			..Default::default()
+		};
+		assert_eq!(exp.max_concurrent_uni_streams(), 3);
+		assert_eq!(exp.max_concurrent_bidi_streams(), 100);
+	}
+
+	#[test]
+	fn test_anti_probe_disabled_uses_original_defaults() {
+		let exp = ExperimentalConfig {
+			anti_probe: false,
+			..Default::default()
+		};
+		assert_eq!(exp.max_concurrent_uni_streams(), 32);
+		assert_eq!(exp.max_concurrent_bidi_streams(), 32);
+	}
+
+	#[test]
+	fn test_anti_probe_defaults_true() {
+		let exp = ExperimentalConfig::default();
+		assert!(exp.anti_probe);
+		assert!(exp.drop_loopback);
+		assert!(exp.drop_private);
+		// Should use anti-fingerprint values by default
+		assert_ne!(exp.max_concurrent_uni_streams(), 32);
+		assert_ne!(exp.max_concurrent_bidi_streams(), 32);
 	}
 
 	#[tokio::test]
@@ -572,42 +610,6 @@ anti_probe = false
 		.await
 		.unwrap();
 		assert!(!config.experimental.anti_probe);
-	}
-
-	#[tokio::test]
-	async fn test_anti_probe_config_default_when_omitted() {
-		let config = test_parse_config("").await.unwrap();
-		assert!(
-			config.experimental.anti_probe,
-			"anti_probe should default to true when not specified"
-		);
-	}
-
-	#[tokio::test]
-	async fn test_default_stream_limits_not_tuic_fingerprint() {
-		// TUIC's known fingerprint is max_concurrent_uni_streams=32,
-		// max_concurrent_bidi_streams=32 Our defaults MUST NOT match this to avoid
-		// GFW detection
-		let config = test_parse_config("").await.unwrap();
-		assert_ne!(
-			config.quic.max_concurrent_uni_streams, 32,
-			"default uni streams must not be 32 (TUIC fingerprint)"
-		);
-		assert_ne!(
-			config.quic.max_concurrent_bidi_streams, 32,
-			"default bidi streams must not be 32 (TUIC fingerprint)"
-		);
-		// Values should be reasonable (> 0, power-of-two-ish)
-		assert!(config.quic.max_concurrent_uni_streams > 0);
-		assert!(config.quic.max_concurrent_bidi_streams > 0);
-	}
-
-	#[tokio::test]
-	async fn test_custom_stream_limits_from_config() {
-		let config = include_str!("../tests/config/custom_stream_limits.toml");
-		let result = test_parse_config(config).await.unwrap();
-		assert_eq!(result.quic.max_concurrent_uni_streams, 128);
-		assert_eq!(result.quic.max_concurrent_bidi_streams, 64);
 	}
 
 	#[tokio::test]
