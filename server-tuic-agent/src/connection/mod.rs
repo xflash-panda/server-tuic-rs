@@ -218,4 +218,26 @@ impl Connection {
 	fn close(&self) {
 		self.inner.close(ERROR_CODE, &[]);
 	}
+
+	/// Check if an error indicates a non-TUIC protocol probe (uni stream)
+	fn is_probe_error(&self, err: &Error) -> bool {
+		if let Error::Model(model_err) = err {
+			return matches!(
+				model_err,
+				tuic::quinn::Error::UnmarshalUniStream(tuic::UnmarshalError::InvalidVersion(_), _)
+			);
+		}
+		false
+	}
+
+	/// Check if an error indicates a non-TUIC protocol probe (bi stream)
+	fn is_probe_error_bi(&self, err: &Error) -> bool {
+		if let Error::Model(model_err) = err {
+			return matches!(
+				model_err,
+				tuic::quinn::Error::UnmarshalBiStream(tuic::UnmarshalError::InvalidVersion(_), _, _)
+			);
+		}
+		false
+	}
 }

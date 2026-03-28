@@ -7,7 +7,7 @@ use tokio::time;
 use tracing::debug;
 use tuic::quinn::Task;
 
-use super::Connection;
+use super::{Connection, anti_probe};
 use crate::{error::Error, utils::UdpRelayMode};
 
 impl Connection {
@@ -68,13 +68,23 @@ impl Connection {
 			Ok(Task::Dissociate(assoc_id)) => self.handle_dissociate(assoc_id).await,
 			Ok(_) => unreachable!(), // already filtered in `tuic_quinn`
 			Err(err) => {
-				debug!(
-					"[{id:#010x}] [{addr}] [{user}] handling incoming unidirectional stream error: {err}",
-					id = self.id(),
-					addr = self.inner.remote_address(),
-					user = self.auth,
-				);
-				self.close();
+				if self.ctx.cfg.experimental.anti_probe && self.is_probe_error(&err) {
+					debug!(
+						"[{id:#010x}] [{addr}] [anti-probe] detected non-TUIC probe, sending H3 response",
+						id = self.id(),
+						addr = self.inner.remote_address(),
+					);
+					anti_probe::send_h3_probe_response(&self.inner).await;
+					self.close();
+				} else {
+					debug!(
+						"[{id:#010x}] [{addr}] [{user}] handling incoming unidirectional stream error: {err}",
+						id = self.id(),
+						addr = self.inner.remote_address(),
+						user = self.auth,
+					);
+					self.close();
+				}
 			}
 		}
 		drop(reg);
@@ -125,13 +135,23 @@ impl Connection {
 			Ok(Task::Connect(conn)) => self.handle_connect(conn).await,
 			Ok(_) => unreachable!(), // already filtered in `tuic_quinn`
 			Err(err) => {
-				debug!(
-					"[{id:#010x}] [{addr}] [{user}] handling incoming bidirectional stream error: {err}",
-					id = self.id(),
-					addr = self.inner.remote_address(),
-					user = self.auth,
-				);
-				self.close();
+				if self.ctx.cfg.experimental.anti_probe && self.is_probe_error_bi(&err) {
+					debug!(
+						"[{id:#010x}] [{addr}] [anti-probe] detected non-TUIC probe, sending H3 response",
+						id = self.id(),
+						addr = self.inner.remote_address(),
+					);
+					anti_probe::send_h3_probe_response(&self.inner).await;
+					self.close();
+				} else {
+					debug!(
+						"[{id:#010x}] [{addr}] [{user}] handling incoming bidirectional stream error: {err}",
+						id = self.id(),
+						addr = self.inner.remote_address(),
+						user = self.auth,
+					);
+					self.close();
+				}
 			}
 		}
 		drop(reg);
