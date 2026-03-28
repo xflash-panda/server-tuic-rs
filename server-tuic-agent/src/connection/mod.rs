@@ -15,6 +15,7 @@ use uuid::Uuid;
 use self::{authenticated::Authenticated, udp_session::UdpSession};
 use crate::{AppContext, UserConnections, error::Error, utils::UdpRelayMode};
 
+mod anti_probe;
 mod authenticated;
 mod handle_stream;
 mod handle_task;
