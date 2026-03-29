@@ -50,6 +50,14 @@ impl Error {
 	pub fn should_silent_drop_for_anti_probe(&self) -> bool {
 		matches!(self, Self::AuthFailed(_) | Self::DuplicatedAuth)
 	}
+
+	/// Check if an error indicates a non-TUIC protocol probe on a datagram.
+	pub fn is_datagram_probe_error(&self) -> bool {
+		matches!(
+			self,
+			Self::Model(tuic::quinn::Error::UnmarshalDatagram(tuic::UnmarshalError::InvalidVersion(_), _))
+		)
+	}
 }
 
 impl From<ConnectionError> for Error {
@@ -112,5 +120,25 @@ mod tests {
 		assert!(!Error::TimedOut.should_silent_drop_for_anti_probe());
 		assert!(!Error::LocallyClosed.should_silent_drop_for_anti_probe());
 		assert!(!Error::TaskNegotiationTimeout.should_silent_drop_for_anti_probe());
+	}
+
+	#[test]
+	fn test_is_datagram_probe_error_invalid_version() {
+		let model_err = tuic::quinn::Error::UnmarshalDatagram(
+			tuic::UnmarshalError::InvalidVersion(0x21),
+			bytes::Bytes::from_static(&[0x21, 0xDE, 0xAD]),
+		);
+		let err = Error::Model(model_err);
+		assert!(
+			err.is_datagram_probe_error(),
+			"InvalidVersion datagram should be detected as probe"
+		);
+	}
+
+	#[test]
+	fn test_is_datagram_probe_error_false_for_other_errors() {
+		assert!(!Error::TimedOut.is_datagram_probe_error());
+		assert!(!Error::DuplicatedAuth.is_datagram_probe_error());
+		assert!(!Error::TaskNegotiationTimeout.is_datagram_probe_error());
 	}
 }

@@ -228,13 +228,22 @@ impl Connection {
 			Ok(Task::Heartbeat) => self.handle_heartbeat().await,
 			Ok(_) => unreachable!(),
 			Err(err) => {
-				debug!(
-					"[{id:#010x}] [{addr}] [{user}] handling incoming datagram error: {err}",
-					id = self.id(),
-					addr = self.inner.remote_address(),
-					user = self.auth,
-				);
-				self.close();
+				if self.ctx.cfg.experimental.anti_probe && err.is_datagram_probe_error() {
+					debug!(
+						"[{id:#010x}] [{addr}] [anti-probe] ignoring invalid datagram: {err}",
+						id = self.id(),
+						addr = self.inner.remote_address(),
+					);
+					// Silently drop — real H3 servers ignore unknown datagrams (RFC 9297)
+				} else {
+					debug!(
+						"[{id:#010x}] [{addr}] [{user}] handling incoming datagram error: {err}",
+						id = self.id(),
+						addr = self.inner.remote_address(),
+						user = self.auth,
+					);
+					self.close();
+				}
 			}
 		}
 	}
