@@ -234,7 +234,8 @@ impl Connection {
 						id = self.id(),
 						addr = self.inner.remote_address(),
 					);
-					// Silently drop — real H3 servers ignore unknown datagrams (RFC 9297)
+					// Silently drop — real H3 servers ignore unknown datagrams
+					// (RFC 9297)
 				} else {
 					debug!(
 						"[{id:#010x}] [{addr}] [{user}] handling incoming datagram error: {err}",

@@ -55,7 +55,10 @@ impl Error {
 	pub fn is_datagram_probe_error(&self) -> bool {
 		matches!(
 			self,
-			Self::Model(tuic::quinn::Error::UnmarshalDatagram(tuic::UnmarshalError::InvalidVersion(_), _))
+			Self::Model(tuic::quinn::Error::UnmarshalDatagram(
+				tuic::UnmarshalError::InvalidVersion(_),
+				_
+			))
 		)
 	}
 }
