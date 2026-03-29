@@ -7,7 +7,10 @@ use std::{
 use arc_swap::ArcSwap;
 use quinn::{Connecting, Connection as QuinnConnection, VarInt};
 use register_count::Counter;
-use tokio::{sync::RwLock as AsyncRwLock, time};
+use tokio::{
+	sync::{Mutex, RwLock as AsyncRwLock},
+	time,
+};
 use tracing::debug;
 use tuic::quinn::{Authenticate, Connection as Model, side};
 use uuid::Uuid;
@@ -35,6 +38,8 @@ pub struct Connection {
 	remote_bi_stream_cnt: Counter,
 	max_concurrent_uni_streams: Arc<AtomicU32>,
 	max_concurrent_bi_streams: Arc<AtomicU32>,
+	/// H3 control stream handle for sending GOAWAY before close (anti-probe)
+	h3_control_stream: Arc<Mutex<Option<quinn::SendStream>>>,
 }
 
 impl Connection {
@@ -127,6 +132,7 @@ impl Connection {
 			remote_bi_stream_cnt: Counter::new(),
 			max_concurrent_uni_streams: Arc::new(AtomicU32::new(init_uni)),
 			max_concurrent_bi_streams: Arc::new(AtomicU32::new(init_bidi)),
+			h3_control_stream: Arc::new(Mutex::new(None)),
 		}
 	}
 
@@ -186,12 +192,24 @@ impl Connection {
 		time::sleep(timeout).await;
 
 		if self.auth.get().is_none() {
-			debug!(
-				"[{id:#010x}] [{addr}] [unauthenticated] [authenticate] timeout",
-				id = self.id(),
-				addr = self.inner.remote_address(),
-			);
-			self.close();
+			if self.ctx.cfg.experimental.anti_probe {
+				// Anti-probe: do NOT close on auth timeout.
+				// Let max_idle_timeout (30s) handle natural closure.
+				// This prevents GFW from detecting TUIC by observing the
+				// characteristic 3s auth_timeout disconnect.
+				debug!(
+					"[{id:#010x}] [{addr}] [unauthenticated] [anti-probe] auth timeout, keeping connection alive",
+					id = self.id(),
+					addr = self.inner.remote_address(),
+				);
+			} else {
+				debug!(
+					"[{id:#010x}] [{addr}] [unauthenticated] [authenticate] timeout",
+					id = self.id(),
+					addr = self.inner.remote_address(),
+				);
+				self.close();
+			}
 		}
 	}
 
@@ -214,8 +232,11 @@ impl Connection {
 	}
 
 	/// Send fake HTTP/3 streams (control + QPACK) to disguise as HTTP/3 server.
+	/// Stores the control stream handle for later GOAWAY frame.
 	async fn send_fake_h3_settings(self) {
-		anti_probe::send_h3_probe_response(&self.inner).await;
+		if let Some(stream) = anti_probe::send_h3_probe_response(&self.inner).await {
+			*self.h3_control_stream.lock().await = Some(stream);
+		}
 	}
 
 	fn id(&self) -> u32 {
@@ -227,7 +248,18 @@ impl Connection {
 	}
 
 	fn close(&self) {
-		self.inner.close(ERROR_CODE, &[]);
+		if self.ctx.cfg.experimental.anti_probe {
+			let h3_control = self.h3_control_stream.clone();
+			let inner = self.inner.clone();
+			tokio::spawn(async move {
+				if let Some(mut stream) = h3_control.lock().await.take() {
+					anti_probe::send_goaway(&mut stream).await;
+				}
+				inner.close(ERROR_CODE, &[]);
+			});
+		} else {
+			self.inner.close(ERROR_CODE, &[]);
+		}
 	}
 
 	/// Check if an error indicates a non-TUIC protocol probe (uni stream)

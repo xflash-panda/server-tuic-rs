@@ -57,6 +57,11 @@ impl Server {
 			.enable_segmentation_offload(ctx.cfg.quic.gso)
 			.mtu_discovery_config(if !ctx.cfg.quic.pmtu { None } else { Some(Default::default()) });
 
+		// Anti-probe: send QUIC PING frames to mimic real H3 server behavior
+		if let Some(interval) = ctx.cfg.experimental.keep_alive_interval() {
+			tp_cfg.keep_alive_interval(Some(interval));
+		}
+
 		let initial_window = ctx.cfg.quic.initial_window;
 		let cc_factory: Arc<dyn ControllerFactory + Send + Sync> = match ctx.cfg.congestion_control {
 			CongestionController::Bbr => {

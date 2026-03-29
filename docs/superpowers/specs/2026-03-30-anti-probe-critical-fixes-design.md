@@ -34,21 +34,19 @@ GFW detects TUIC servers within ~12 hours via active probing. The server has H3 
 
 **Impact on TUIC clients:** Zero. Authenticated connections are unaffected. Only unauthenticated (probe) connections stay open longer.
 
-### Fix 2: Transport parameters (`server.rs`, `config.rs`)
+### Fix 2: Transport parameters (`server.rs`)
 
-When `anti_probe=true`, override transport parameters to match Caddy h3 defaults:
+When `anti_probe=true`, add QUIC keep_alive to mimic real H3 server behavior:
 
-| Parameter | Current | New (anti_probe) | Caddy Reference |
-|-----------|---------|-------------------|-----------------|
-| `send_window` | 16MB | 1.5MB (1572864) | Caddy default |
-| `stream_receive_window` | 8MB | 1MB (1048576) | Caddy default |
-| `keep_alive_interval` | None | 15s | Common H3 behavior |
+| Parameter | Current | New (anti_probe) |
+|-----------|---------|-------------------|
+| `keep_alive_interval` | None | 15s |
 
-These are initial values. QUIC flow control dynamically scales windows during active transfers, so sustained throughput impact is minimal — the connection ramps up quickly once data flows.
+Keep-alive sends QUIC PING frames, which real H3 servers do. This also helps NAT keepalive for legitimate clients.
 
-When `anti_probe=false`: existing values unchanged.
+Window sizes (`send_window`, `stream_receive_window`) are kept unchanged to avoid throughput impact. Window sizes are low-confidence fingerprints — GFW is unlikely to use them as a detection vector.
 
-**Implementation:** Add `anti_probe_send_window()`, `anti_probe_receive_window()`, `anti_probe_keep_alive_interval()` methods to `ExperimentalConfig`, used in `server.rs` TransportConfig setup.
+When `anti_probe=false`: unchanged.
 
 ### Fix 3: GOAWAY frame before close (`anti_probe.rs`, `connection/mod.rs`)
 
@@ -82,8 +80,7 @@ We send `last_stream_id = 0` (no streams were processed for probe connections).
 |------|---------|
 | `server-tuic-agent/src/connection/mod.rs` | Modify `timeout_authenticate()`, store control stream handle |
 | `server-tuic-agent/src/connection/anti_probe.rs` | Add `build_h3_goaway_frame()`, `send_goaway_before_close()` |
-| `server-tuic-agent/src/server.rs` | Apply anti_probe transport params |
-| `server-tuic-agent/src/config.rs` | Add anti_probe window/keepalive config methods |
+| `server-tuic-agent/src/server.rs` | Add keep_alive_interval when anti_probe=true |
 
 ## Test Plan
 
@@ -95,10 +92,8 @@ We send `last_stream_id = 0` (no streams were processed for probe connections).
 
 ### Unit Tests (`config.rs`)
 
-4. `test_anti_probe_send_window` — returns 1572864 when anti_probe=true
-5. `test_anti_probe_receive_window` — returns 1048576 when anti_probe=true
-6. `test_anti_probe_keep_alive` — returns 15s when anti_probe=true
-7. `test_default_windows_when_anti_probe_off` — returns original values when anti_probe=false
+4. `test_anti_probe_keep_alive` — returns Some(15s) when anti_probe=true
+5. `test_no_keep_alive_when_anti_probe_off` — returns None when anti_probe=false
 
 ### Integration Tests (tuic-probe)
 

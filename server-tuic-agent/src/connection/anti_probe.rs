@@ -114,6 +114,27 @@ fn build_h3_data_frame(body: &[u8]) -> Vec<u8> {
 	buf
 }
 
+/// Build an H3 GOAWAY frame (type 0x07) with the given last stream ID.
+///
+/// RFC 9114 Section 5.2:
+/// ```text
+/// GOAWAY Frame {
+///   Type (i) = 0x07,
+///   Length (i),
+///   Stream ID (i),
+/// }
+/// ```
+pub fn build_h3_goaway_frame(last_stream_id: u64) -> Vec<u8> {
+	let mut stream_id_buf = Vec::new();
+	encode_varint(&mut stream_id_buf, last_stream_id);
+
+	let mut buf = Vec::new();
+	encode_varint(&mut buf, 0x07); // GOAWAY frame type
+	encode_varint(&mut buf, stream_id_buf.len() as u64); // length
+	buf.extend_from_slice(&stream_id_buf); // stream ID
+	buf
+}
+
 /// Build a complete H3 404 response (HEADERS + DATA frames).
 fn build_h3_404_response() -> Vec<u8> {
 	let body = b"<html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>";
@@ -137,10 +158,27 @@ pub async fn send_h3_bidi_response(send: &mut quinn::SendStream) {
 }
 
 /// Send an H3 probe response by opening control + QPACK uni streams.
-pub async fn send_h3_probe_response(conn: &quinn::Connection) {
-	let control = build_h3_control_stream();
+/// Returns the control stream handle so GOAWAY can be sent later before close.
+pub async fn send_h3_probe_response(conn: &quinn::Connection) -> Option<quinn::SendStream> {
+	let control_data = build_h3_control_stream();
 	let encoder = build_qpack_encoder_stream();
 	let decoder = build_qpack_decoder_stream();
+
+	// Open control stream separately so we can return its handle
+	let control_stream = match conn.open_uni().await {
+		Ok(mut stream) => {
+			if let Err(e) = stream.write_all(&control_data).await {
+				debug!("anti-probe: failed to write control stream: {e}");
+				None
+			} else {
+				Some(stream)
+			}
+		}
+		Err(e) => {
+			debug!("anti-probe: failed to open control uni stream: {e}");
+			None
+		}
+	};
 
 	let send_stream = |data: Vec<u8>, name: &'static str| {
 		let conn = conn.clone();
@@ -159,11 +197,17 @@ pub async fn send_h3_probe_response(conn: &quinn::Connection) {
 		}
 	};
 
-	tokio::join!(
-		send_stream(control, "control"),
-		send_stream(encoder, "qpack-encoder"),
-		send_stream(decoder, "qpack-decoder"),
-	);
+	tokio::join!(send_stream(encoder, "qpack-encoder"), send_stream(decoder, "qpack-decoder"),);
+
+	control_stream
+}
+
+/// Send an H3 GOAWAY frame on the control stream before closing.
+pub async fn send_goaway(control_stream: &mut quinn::SendStream) {
+	let goaway = build_h3_goaway_frame(0);
+	if let Err(e) = control_stream.write_all(&goaway).await {
+		debug!("anti-probe: failed to write GOAWAY: {e}");
+	}
 }
 
 #[cfg(test)]
@@ -329,6 +373,37 @@ mod tests {
 			response[data_frame_start], 0x00,
 			"DATA frame type should follow HEADERS frame"
 		);
+	}
+
+	// --- H3 GOAWAY frame tests ---
+
+	#[test]
+	fn test_build_h3_goaway_frame_zero() {
+		// GOAWAY with stream_id=0: type(0x07) + length(1) + stream_id(0x00)
+		let frame = build_h3_goaway_frame(0);
+		assert_eq!(frame[0], 0x07, "frame type should be GOAWAY (0x07)");
+		assert_eq!(frame[1], 0x01, "frame length should be 1 (varint-encoded 0)");
+		assert_eq!(frame[2], 0x00, "stream_id should be 0");
+		assert_eq!(frame.len(), 3);
+	}
+
+	#[test]
+	fn test_build_h3_goaway_frame_nonzero() {
+		// GOAWAY with stream_id=4: type(0x07) + length(1) + stream_id(0x04)
+		let frame = build_h3_goaway_frame(4);
+		assert_eq!(frame[0], 0x07, "frame type should be GOAWAY (0x07)");
+		assert_eq!(frame[1], 0x01, "frame length should be 1");
+		assert_eq!(frame[2], 0x04, "stream_id should be 4");
+	}
+
+	#[test]
+	fn test_build_h3_goaway_frame_large_id() {
+		// stream_id=15293 requires 2-byte varint encoding
+		let frame = build_h3_goaway_frame(15293);
+		assert_eq!(frame[0], 0x07, "frame type should be GOAWAY (0x07)");
+		assert_eq!(frame[1], 0x02, "frame length should be 2 (2-byte varint)");
+		// 15293 encodes as [0x7b, 0xbd] in QUIC varint
+		assert_eq!(&frame[2..4], &[0x7b, 0xbd], "stream_id varint encoding");
 	}
 
 	#[test]

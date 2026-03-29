@@ -289,6 +289,16 @@ impl ExperimentalConfig {
 			Self::DEFAULT_CONCURRENT_STREAMS
 		}
 	}
+
+	/// QUIC keep-alive interval. When anti_probe is enabled, sends PING frames
+	/// every 15s to mimic real HTTP/3 server behavior and help NAT keepalive.
+	pub fn keep_alive_interval(&self) -> Option<Duration> {
+		if self.anti_probe {
+			Some(Duration::from_secs(15))
+		} else {
+			None
+		}
+	}
 }
 
 impl Config {
@@ -597,6 +607,24 @@ mod tests {
 		// Should use anti-fingerprint values by default
 		assert_ne!(exp.max_concurrent_uni_streams(), 32);
 		assert_ne!(exp.max_concurrent_bidi_streams(), 32);
+	}
+
+	#[test]
+	fn test_anti_probe_keep_alive_enabled() {
+		let exp = ExperimentalConfig {
+			anti_probe: true,
+			..Default::default()
+		};
+		assert_eq!(exp.keep_alive_interval(), Some(Duration::from_secs(15)));
+	}
+
+	#[test]
+	fn test_no_keep_alive_when_anti_probe_off() {
+		let exp = ExperimentalConfig {
+			anti_probe: false,
+			..Default::default()
+		};
+		assert_eq!(exp.keep_alive_interval(), None);
 	}
 
 	#[tokio::test]
