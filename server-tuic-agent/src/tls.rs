@@ -10,8 +10,8 @@ use rustls::{
 #[derive(Debug)]
 pub struct CertResolver {
 	cert_key:     Arc<CertifiedKey>,
-	/// When set, only accept TLS handshakes where the client's SNI matches this value.
-	/// None = accept any SNI (backward compatible).
+	/// When set, only accept TLS handshakes where the client's SNI matches this
+	/// value. None = accept any SNI (backward compatible).
 	expected_sni: Option<String>,
 }
 
@@ -30,7 +30,8 @@ impl ResolvesServerCert for CertResolver {
 				Some(sni) => {
 					tracing::debug!(
 						"[anti-probe] SNI mismatch: expected={}, got={} — rejecting TLS handshake",
-						expected, sni
+						expected,
+						sni
 					);
 					None
 				}
@@ -230,13 +231,9 @@ mod tests {
 		let (cert_der, key_der) = generate_test_cert_der()?;
 		let (cert_file, key_file) = create_temp_cert_file(&cert_der, &key_der).await;
 
-		let resolver = CertResolver::new(
-			cert_file.path(),
-			key_file.path(),
-			Some("example.com".to_string()),
-		)
-		.await
-		.unwrap();
+		let resolver = CertResolver::new(cert_file.path(), key_file.path(), Some("example.com".to_string()))
+			.await
+			.unwrap();
 
 		assert!(resolver.expected_sni.is_some());
 		assert_eq!(resolver.expected_sni.as_deref(), Some("example.com"));

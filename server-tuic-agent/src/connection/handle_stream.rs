@@ -93,8 +93,9 @@ impl Connection {
 							id = self.id(),
 							addr = self.inner.remote_address(),
 						);
-						// Real H3 servers don't close the connection when a single
-						// stream is slow. Let idle timeout handle it.
+						// Real H3 servers don't close the connection when a
+						// single stream is slow. Let idle timeout handle
+						// it.
 					} else {
 						debug!(
 							"[{id:#010x}] [{addr}] [{user}] handling incoming unidirectional stream error: {err}",
@@ -180,13 +181,13 @@ impl Connection {
 							// like a real server
 						}
 						Err(err) if err.is_negotiation_timeout() => {
-						debug!(
-							"[{id:#010x}] [{addr}] [anti-probe] bidi-stream negotiation timeout, keeping connection alive",
-							id = self.id(),
-							addr = self.inner.remote_address(),
-						);
-					}
-					Err(err) => {
+							debug!(
+								"[{id:#010x}] [{addr}] [anti-probe] bidi-stream negotiation timeout, keeping connection alive",
+								id = self.id(),
+								addr = self.inner.remote_address(),
+							);
+						}
+						Err(err) => {
 							debug!(
 								"[{id:#010x}] [{addr}] [{user}] handling incoming bidirectional stream error: {err}",
 								id = self.id(),
