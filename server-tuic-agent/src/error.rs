@@ -51,6 +51,14 @@ impl Error {
 		matches!(self, Self::AuthFailed(_) | Self::DuplicatedAuth)
 	}
 
+	/// Whether this error is a task negotiation timeout.
+	/// When anti_probe is enabled, these should not close the connection —
+	/// a real H3 server would not close the entire connection because
+	/// one stream was slow to send data.
+	pub fn is_negotiation_timeout(&self) -> bool {
+		matches!(self, Self::TaskNegotiationTimeout)
+	}
+
 	/// Check if an error indicates a non-TUIC protocol probe on a datagram.
 	pub fn is_datagram_probe_error(&self) -> bool {
 		matches!(
@@ -123,6 +131,14 @@ mod tests {
 		assert!(!Error::TimedOut.should_silent_drop_for_anti_probe());
 		assert!(!Error::LocallyClosed.should_silent_drop_for_anti_probe());
 		assert!(!Error::TaskNegotiationTimeout.should_silent_drop_for_anti_probe());
+	}
+
+	#[test]
+	fn test_is_negotiation_timeout() {
+		assert!(Error::TaskNegotiationTimeout.is_negotiation_timeout());
+		assert!(!Error::TimedOut.is_negotiation_timeout());
+		assert!(!Error::AuthFailed(Uuid::nil()).is_negotiation_timeout());
+		assert!(!Error::DuplicatedAuth.is_negotiation_timeout());
 	}
 
 	#[test]

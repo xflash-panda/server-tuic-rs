@@ -87,6 +87,14 @@ impl Connection {
 						);
 						// Mimic H3 server ignoring unknown stream type — don't
 						// close connection.
+					} else if err.is_negotiation_timeout() {
+						debug!(
+							"[{id:#010x}] [{addr}] [anti-probe] uni-stream negotiation timeout, keeping connection alive",
+							id = self.id(),
+							addr = self.inner.remote_address(),
+						);
+						// Real H3 servers don't close the connection when a single
+						// stream is slow. Let idle timeout handle it.
 					} else {
 						debug!(
 							"[{id:#010x}] [{addr}] [{user}] handling incoming unidirectional stream error: {err}",
@@ -171,7 +179,14 @@ impl Connection {
 							// Don't close — let auth timeout close naturally,
 							// like a real server
 						}
-						Err(err) => {
+						Err(err) if err.is_negotiation_timeout() => {
+						debug!(
+							"[{id:#010x}] [{addr}] [anti-probe] bidi-stream negotiation timeout, keeping connection alive",
+							id = self.id(),
+							addr = self.inner.remote_address(),
+						);
+					}
+					Err(err) => {
 							debug!(
 								"[{id:#010x}] [{addr}] [{user}] handling incoming bidirectional stream error: {err}",
 								id = self.id(),
