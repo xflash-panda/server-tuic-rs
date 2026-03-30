@@ -29,6 +29,8 @@ struct PanelState {
 	zero_rtt_handshake: Option<bool>,
 	/// Congestion control algorithm from API config
 	congestion_control: Option<String>,
+	/// Server name (SNI) from API config
+	server_name:        Option<String>,
 }
 
 fn get_hostname() -> String {
@@ -567,6 +569,7 @@ impl PanelService for Panel {
 		let mut zero_rtt_handshake = false;
 		let mut congestion_control = CongestionController::default();
 		let mut node_id: i64 = 0;
+		let mut server_name: Option<String> = None;
 
 		if let Some(state) = self.load_state() {
 			if let Some(saved_register_id) = &state.register_id {
@@ -593,6 +596,7 @@ impl PanelService for Panel {
 									),
 								}
 							}
+							server_name = state.server_name.clone();
 							info!(
 								"Using cached config - server_port: {}, zero_rtt_handshake: {}, congestion_control: {:?}, id: \
 								 {}",
@@ -625,6 +629,7 @@ impl PanelService for Panel {
 			server_port = tuic_config.server_port;
 			zero_rtt_handshake = tuic_config.zero_rtt_handshake;
 			node_id = tuic_config.id;
+			server_name = tuic_config.server_name.clone();
 			if let Some(cc_str) = &tuic_config.server_congestion_control {
 				match cc_str.parse::<CongestionController>() {
 					Ok(cc) => congestion_control = cc,
@@ -635,8 +640,8 @@ impl PanelService for Panel {
 				}
 			}
 			info!(
-				"Tuic config - server_port: {}, zero_rtt_handshake: {}, congestion_control: {:?}, id: {}",
-				server_port, zero_rtt_handshake, congestion_control, node_id
+				"Tuic config - server_port: {}, zero_rtt_handshake: {}, congestion_control: {:?}, id: {}, server_name: {:?}",
+				server_port, zero_rtt_handshake, congestion_control, node_id, server_name
 			);
 		}
 
@@ -644,6 +649,7 @@ impl PanelService for Panel {
 		cfg.server_port = server_port;
 		cfg.zero_rtt_handshake = zero_rtt_handshake;
 		cfg.congestion_control = congestion_control;
+		cfg.server_name = server_name.clone();
 
 		if need_register {
 			// Get hostname and register node
@@ -668,6 +674,7 @@ impl PanelService for Panel {
 				server_port:        Some(server_port),
 				zero_rtt_handshake: Some(zero_rtt_handshake),
 				congestion_control: Some(format!("{:?}", congestion_control).to_lowercase()),
+				server_name:        server_name.clone(),
 			};
 			self.save_state(&state)?;
 		} else if need_fetch_config {
@@ -679,6 +686,7 @@ impl PanelService for Panel {
 				server_port: Some(server_port),
 				zero_rtt_handshake: Some(zero_rtt_handshake),
 				congestion_control: Some(format!("{:?}", congestion_control).to_lowercase()),
+				server_name: server_name.clone(),
 			};
 			self.save_state(&state)?;
 		}

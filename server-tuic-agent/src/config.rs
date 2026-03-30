@@ -136,6 +136,12 @@ pub struct Config {
 	#[serde(skip)]
 	pub zero_rtt_handshake: bool,
 
+	/// Server name for SNI validation (set from panel API during init).
+	/// When anti_probe=true and this is Some, CertResolver will reject
+	/// TLS handshakes with mismatched SNI.
+	#[serde(skip)]
+	pub server_name: Option<String>,
+
 	/// Old zero_rtt_handshake field (deprecated, now fetched from panel API)
 	#[serde(default, skip_serializing, rename = "zero_rtt_handshake")]
 	#[deprecated]
