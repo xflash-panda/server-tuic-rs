@@ -136,9 +136,7 @@ pub struct Config {
 	#[serde(skip)]
 	pub zero_rtt_handshake: bool,
 
-	/// Server name for SNI validation (set from panel API during init).
-	/// When anti_probe=true and this is Some, CertResolver will reject
-	/// TLS handshakes with mismatched SNI.
+	/// Server name (set from panel API during init).
 	#[serde(skip)]
 	pub server_name: Option<String>,
 
@@ -261,11 +259,6 @@ pub struct QuicConfig {
 #[educe(Default)]
 #[serde(default)]
 pub struct ExperimentalConfig {
-	/// Anti-probe defense: use anti-fingerprint QUIC stream limits,
-	/// send fake HTTP/3 SETTINGS frame on new connections,
-	/// and respond with H3 frames to non-TUIC probes.
-	#[educe(Default = true)]
-	pub anti_probe:    bool,
 	#[educe(Default = true)]
 	pub drop_loopback: bool,
 	#[educe(Default = true)]
@@ -273,37 +266,14 @@ pub struct ExperimentalConfig {
 }
 
 impl ExperimentalConfig {
-	/// Anti-fingerprint: mimics typical HTTP/3 server
-	const ANTI_CONCURRENT_BIDI_STREAMS: u32 = 100;
-	/// Anti-fingerprint: mimics HTTP/3 QPACK encoder/decoder + control stream
-	const ANTI_CONCURRENT_UNI_STREAMS: u32 = 3;
-	/// TUIC original stream limits
 	const DEFAULT_CONCURRENT_STREAMS: u32 = 32;
 
 	pub fn max_concurrent_uni_streams(&self) -> u32 {
-		if self.anti_probe {
-			Self::ANTI_CONCURRENT_UNI_STREAMS
-		} else {
-			Self::DEFAULT_CONCURRENT_STREAMS
-		}
+		Self::DEFAULT_CONCURRENT_STREAMS
 	}
 
 	pub fn max_concurrent_bidi_streams(&self) -> u32 {
-		if self.anti_probe {
-			Self::ANTI_CONCURRENT_BIDI_STREAMS
-		} else {
-			Self::DEFAULT_CONCURRENT_STREAMS
-		}
-	}
-
-	/// QUIC keep-alive interval. When anti_probe is enabled, sends PING frames
-	/// every 15s to mimic real HTTP/3 server behavior and help NAT keepalive.
-	pub fn keep_alive_interval(&self) -> Option<Duration> {
-		if self.anti_probe {
-			Some(Duration::from_secs(15))
-		} else {
-			None
-		}
+		Self::DEFAULT_CONCURRENT_STREAMS
 	}
 }
 
@@ -583,68 +553,6 @@ mod tests {
 		assert_eq!(result.stream_timeout, Duration::from_secs(120));
 	}
 
-
-	#[test]
-	fn test_anti_probe_enabled_uses_anti_fingerprint_values() {
-		let exp = ExperimentalConfig {
-			anti_probe: true,
-			..Default::default()
-		};
-		assert_eq!(exp.max_concurrent_uni_streams(), 3);
-		assert_eq!(exp.max_concurrent_bidi_streams(), 100);
-	}
-
-	#[test]
-	fn test_anti_probe_disabled_uses_original_defaults() {
-		let exp = ExperimentalConfig {
-			anti_probe: false,
-			..Default::default()
-		};
-		assert_eq!(exp.max_concurrent_uni_streams(), 32);
-		assert_eq!(exp.max_concurrent_bidi_streams(), 32);
-	}
-
-	#[test]
-	fn test_anti_probe_defaults_true() {
-		let exp = ExperimentalConfig::default();
-		assert!(exp.anti_probe);
-		assert!(exp.drop_loopback);
-		assert!(exp.drop_private);
-		// Should use anti-fingerprint values by default
-		assert_ne!(exp.max_concurrent_uni_streams(), 32);
-		assert_ne!(exp.max_concurrent_bidi_streams(), 32);
-	}
-
-	#[test]
-	fn test_anti_probe_keep_alive_enabled() {
-		let exp = ExperimentalConfig {
-			anti_probe: true,
-			..Default::default()
-		};
-		assert_eq!(exp.keep_alive_interval(), Some(Duration::from_secs(15)));
-	}
-
-	#[test]
-	fn test_no_keep_alive_when_anti_probe_off() {
-		let exp = ExperimentalConfig {
-			anti_probe: false,
-			..Default::default()
-		};
-		assert_eq!(exp.keep_alive_interval(), None);
-	}
-
-	#[tokio::test]
-	async fn test_anti_probe_config_from_toml() {
-		let config = test_parse_config(
-			r#"
-[experimental]
-anti_probe = false
-"#,
-		)
-		.await
-		.unwrap();
-		assert!(!config.experimental.anti_probe);
-	}
 
 	#[tokio::test]
 	async fn test_congestion_control_in_config_file_ignored() {

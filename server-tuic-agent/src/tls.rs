@@ -9,43 +9,19 @@ use rustls::{
 
 #[derive(Debug)]
 pub struct CertResolver {
-	cert_key:     Arc<CertifiedKey>,
-	/// When set, only accept TLS handshakes where the client's SNI matches this
-	/// value. None = accept any SNI (backward compatible).
-	expected_sni: Option<String>,
+	cert_key: Arc<CertifiedKey>,
 }
 
 impl CertResolver {
-	pub async fn new(cert_path: &Path, key_path: &Path, expected_sni: Option<String>) -> Result<Arc<Self>> {
+	pub async fn new(cert_path: &Path, key_path: &Path) -> Result<Arc<Self>> {
 		let cert_key = load_cert_key(cert_path, key_path).await?;
-		Ok(Arc::new(Self { cert_key, expected_sni }))
+		Ok(Arc::new(Self { cert_key }))
 	}
 }
 
 impl ResolvesServerCert for CertResolver {
-	fn resolve(&self, client_hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
-		if let Some(expected) = &self.expected_sni {
-			match client_hello.server_name() {
-				Some(sni) if sni == expected.as_str() => Some(self.cert_key.clone()),
-				Some(sni) => {
-					tracing::debug!(
-						"[anti-probe] SNI mismatch: expected={}, got={} — rejecting TLS handshake",
-						expected,
-						sni
-					);
-					None
-				}
-				None => {
-					tracing::debug!(
-						"[anti-probe] no SNI provided, expected={} — rejecting TLS handshake",
-						expected
-					);
-					None
-				}
-			}
-		} else {
-			Some(self.cert_key.clone())
-		}
+	fn resolve(&self, _client_hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
+		Some(self.cert_key.clone())
 	}
 }
 
@@ -209,7 +185,7 @@ mod tests {
 		let (cert_der, key_der) = generate_test_cert_der()?;
 		let (cert_file, key_file) = create_temp_cert_file(&cert_der, &key_der).await;
 
-		let resolver = CertResolver::new(cert_file.path(), key_file.path(), None).await.unwrap();
+		let resolver = CertResolver::new(cert_file.path(), key_file.path()).await.unwrap();
 
 		assert!(!resolver.cert_key.cert.is_empty());
 		Ok(())
@@ -222,32 +198,7 @@ mod tests {
 		let load_result = load_cert_key(cert_file.path(), key_file.path()).await;
 		assert!(load_result.is_err());
 
-		let resolver_result = CertResolver::new(cert_file.path(), key_file.path(), None).await;
+		let resolver_result = CertResolver::new(cert_file.path(), key_file.path()).await;
 		assert!(resolver_result.is_err());
-	}
-
-	#[tokio::test]
-	async fn test_cert_resolver_with_expected_sni() -> Result<()> {
-		let (cert_der, key_der) = generate_test_cert_der()?;
-		let (cert_file, key_file) = create_temp_cert_file(&cert_der, &key_der).await;
-
-		let resolver = CertResolver::new(cert_file.path(), key_file.path(), Some("example.com".to_string()))
-			.await
-			.unwrap();
-
-		assert!(resolver.expected_sni.is_some());
-		assert_eq!(resolver.expected_sni.as_deref(), Some("example.com"));
-		Ok(())
-	}
-
-	#[tokio::test]
-	async fn test_cert_resolver_without_sni_accepts_all() -> Result<()> {
-		let (cert_der, key_der) = generate_test_cert_der()?;
-		let (cert_file, key_file) = create_temp_cert_file(&cert_der, &key_der).await;
-
-		let resolver = CertResolver::new(cert_file.path(), key_file.path(), None).await.unwrap();
-
-		assert!(resolver.expected_sni.is_none());
-		Ok(())
 	}
 }

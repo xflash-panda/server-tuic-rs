@@ -7,10 +7,7 @@ use std::{
 use arc_swap::ArcSwap;
 use quinn::{Connecting, Connection as QuinnConnection, VarInt};
 use register_count::Counter;
-use tokio::{
-	sync::{Mutex, RwLock as AsyncRwLock},
-	time,
-};
+use tokio::{sync::RwLock as AsyncRwLock, time};
 use tracing::debug;
 use tuic::quinn::{Authenticate, Connection as Model, side};
 use uuid::Uuid;
@@ -18,7 +15,6 @@ use uuid::Uuid;
 use self::{authenticated::Authenticated, udp_session::UdpSession};
 use crate::{AppContext, UserConnections, error::Error, utils::UdpRelayMode};
 
-mod anti_probe;
 mod authenticated;
 mod handle_stream;
 mod handle_task;
@@ -38,8 +34,6 @@ pub struct Connection {
 	remote_bi_stream_cnt: Counter,
 	max_concurrent_uni_streams: Arc<AtomicU32>,
 	max_concurrent_bi_streams: Arc<AtomicU32>,
-	/// H3 control stream handle for sending GOAWAY before close (anti-probe)
-	h3_control_stream: Arc<Mutex<Option<quinn::SendStream>>>,
 }
 
 impl Connection {
@@ -66,11 +60,6 @@ impl Connection {
 					id = conn.id(),
 					user = conn.auth,
 				);
-
-				// Anti-probe: send fake HTTP/3 SETTINGS frame to disguise as HTTP/3 server
-				if ctx.cfg.experimental.anti_probe {
-					tokio::spawn(conn.clone().send_fake_h3_settings());
-				}
 
 				tokio::spawn(conn.clone().timeout_authenticate(ctx.cfg.auth_timeout));
 				tokio::spawn(conn.clone().collect_garbage());
@@ -132,7 +121,6 @@ impl Connection {
 			remote_bi_stream_cnt: Counter::new(),
 			max_concurrent_uni_streams: Arc::new(AtomicU32::new(init_uni)),
 			max_concurrent_bi_streams: Arc::new(AtomicU32::new(init_bidi)),
-			h3_control_stream: Arc::new(Mutex::new(None)),
 		}
 	}
 
@@ -192,24 +180,12 @@ impl Connection {
 		time::sleep(timeout).await;
 
 		if self.auth.get().is_none() {
-			if self.ctx.cfg.experimental.anti_probe {
-				// Anti-probe: do NOT close on auth timeout.
-				// Let max_idle_timeout (30s) handle natural closure.
-				// This prevents GFW from detecting TUIC by observing the
-				// characteristic 3s auth_timeout disconnect.
-				debug!(
-					"[{id:#010x}] [{addr}] [unauthenticated] [anti-probe] auth timeout, keeping connection alive",
-					id = self.id(),
-					addr = self.inner.remote_address(),
-				);
-			} else {
-				debug!(
-					"[{id:#010x}] [{addr}] [unauthenticated] [authenticate] timeout",
-					id = self.id(),
-					addr = self.inner.remote_address(),
-				);
-				self.close();
-			}
+			debug!(
+				"[{id:#010x}] [{addr}] [unauthenticated] [authenticate] timeout",
+				id = self.id(),
+				addr = self.inner.remote_address(),
+			);
+			self.close();
 		}
 	}
 
@@ -231,14 +207,6 @@ impl Connection {
 		}
 	}
 
-	/// Send fake HTTP/3 streams (control + QPACK) to disguise as HTTP/3 server.
-	/// Stores the control stream handle for later GOAWAY frame.
-	async fn send_fake_h3_settings(self) {
-		if let Some(stream) = anti_probe::send_h3_probe_response(&self.inner).await {
-			*self.h3_control_stream.lock().await = Some(stream);
-		}
-	}
-
 	fn id(&self) -> u32 {
 		self.inner.stable_id() as u32
 	}
@@ -248,38 +216,6 @@ impl Connection {
 	}
 
 	fn close(&self) {
-		if self.ctx.cfg.experimental.anti_probe {
-			let h3_control = self.h3_control_stream.clone();
-			let inner = self.inner.clone();
-			tokio::spawn(async move {
-				if let Some(mut stream) = h3_control.lock().await.take() {
-					anti_probe::send_goaway(&mut stream).await;
-				}
-				inner.close(ERROR_CODE, &[]);
-			});
-		} else {
-			self.inner.close(ERROR_CODE, &[]);
-		}
-	}
-
-	/// Check if an error indicates a non-TUIC protocol probe (uni stream)
-	fn is_probe_error(&self, err: &Error) -> bool {
-		if let Error::Model(model_err) = err {
-			return matches!(
-				model_err,
-				tuic::quinn::Error::UnmarshalUniStream(tuic::UnmarshalError::InvalidVersion(_), _)
-			);
-		}
-		false
-	}
-
-	/// Try to extract the SendStream from a bi stream probe error.
-	/// Consumes the error on success, returns it on failure.
-	fn try_extract_probe_bi_send(err: Error) -> Result<quinn::SendStream, Error> {
-		if let Error::Model(tuic::quinn::Error::UnmarshalBiStream(tuic::UnmarshalError::InvalidVersion(_), send, _)) = err {
-			Ok(send)
-		} else {
-			Err(err)
-		}
+		self.inner.close(ERROR_CODE, &[]);
 	}
 }

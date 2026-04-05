@@ -7,7 +7,7 @@ use tokio::time;
 use tracing::debug;
 use tuic::quinn::Task;
 
-use super::{Connection, anti_probe};
+use super::Connection;
 use crate::{error::Error, utils::UdpRelayMode};
 
 impl Connection {
@@ -68,52 +68,13 @@ impl Connection {
 			Ok(Task::Dissociate(assoc_id)) => self.handle_dissociate(assoc_id).await,
 			Ok(_) => unreachable!(), // already filtered in `tuic_quinn`
 			Err(err) => {
-				if self.ctx.cfg.experimental.anti_probe {
-					if self.is_probe_error(&err) {
-						debug!(
-							"[{id:#010x}] [{addr}] [anti-probe] detected non-TUIC probe on uni stream",
-							id = self.id(),
-							addr = self.inner.remote_address(),
-						);
-						// Uni streams (control + QPACK) already sent
-						// proactively at connection setup. Don't close —
-						// let auth timeout close naturally, like a real H3
-						// server.
-					} else if err.should_silent_drop_for_anti_probe() {
-						debug!(
-							"[{id:#010x}] [{addr}] [anti-probe] silently dropping error: {err}",
-							id = self.id(),
-							addr = self.inner.remote_address(),
-						);
-						// Mimic H3 server ignoring unknown stream type — don't
-						// close connection.
-					} else if err.is_negotiation_timeout() {
-						debug!(
-							"[{id:#010x}] [{addr}] [anti-probe] uni-stream negotiation timeout, keeping connection alive",
-							id = self.id(),
-							addr = self.inner.remote_address(),
-						);
-						// Real H3 servers don't close the connection when a
-						// single stream is slow. Let idle timeout handle
-						// it.
-					} else {
-						debug!(
-							"[{id:#010x}] [{addr}] [{user}] handling incoming unidirectional stream error: {err}",
-							id = self.id(),
-							addr = self.inner.remote_address(),
-							user = self.auth,
-						);
-						self.close();
-					}
-				} else {
-					debug!(
-						"[{id:#010x}] [{addr}] [{user}] handling incoming unidirectional stream error: {err}",
-						id = self.id(),
-						addr = self.inner.remote_address(),
-						user = self.auth,
-					);
-					self.close();
-				}
+				debug!(
+					"[{id:#010x}] [{addr}] [{user}] handling incoming unidirectional stream error: {err}",
+					id = self.id(),
+					addr = self.inner.remote_address(),
+					user = self.auth,
+				);
+				self.close();
 			}
 		}
 		drop(reg);
@@ -164,48 +125,13 @@ impl Connection {
 			Ok(Task::Connect(conn)) => self.handle_connect(conn).await,
 			Ok(_) => unreachable!(), // already filtered in `tuic_quinn`
 			Err(err) => {
-				if self.ctx.cfg.experimental.anti_probe {
-					match Connection::try_extract_probe_bi_send(err) {
-						Ok(mut send) => {
-							debug!(
-								"[{id:#010x}] [{addr}] [anti-probe] detected non-TUIC probe on bidi stream, sending H3 404 \
-								 response",
-								id = self.id(),
-								addr = self.inner.remote_address(),
-							);
-							// Respond with H3 404 on the same bidi stream (like a real HTTP/3 server)
-							// Uni streams (control + QPACK) were already sent proactively at connection
-							// setup
-							anti_probe::send_h3_bidi_response(&mut send).await;
-							// Don't close — let auth timeout close naturally,
-							// like a real server
-						}
-						Err(err) if err.is_negotiation_timeout() => {
-							debug!(
-								"[{id:#010x}] [{addr}] [anti-probe] bidi-stream negotiation timeout, keeping connection alive",
-								id = self.id(),
-								addr = self.inner.remote_address(),
-							);
-						}
-						Err(err) => {
-							debug!(
-								"[{id:#010x}] [{addr}] [{user}] handling incoming bidirectional stream error: {err}",
-								id = self.id(),
-								addr = self.inner.remote_address(),
-								user = self.auth,
-							);
-							self.close();
-						}
-					}
-				} else {
-					debug!(
-						"[{id:#010x}] [{addr}] [{user}] handling incoming bidirectional stream error: {err}",
-						id = self.id(),
-						addr = self.inner.remote_address(),
-						user = self.auth,
-					);
-					self.close();
-				}
+				debug!(
+					"[{id:#010x}] [{addr}] [{user}] handling incoming bidirectional stream error: {err}",
+					id = self.id(),
+					addr = self.inner.remote_address(),
+					user = self.auth,
+				);
+				self.close();
 			}
 		}
 		drop(reg);
@@ -244,23 +170,13 @@ impl Connection {
 			Ok(Task::Heartbeat) => self.handle_heartbeat().await,
 			Ok(_) => unreachable!(),
 			Err(err) => {
-				if self.ctx.cfg.experimental.anti_probe && err.is_datagram_probe_error() {
-					debug!(
-						"[{id:#010x}] [{addr}] [anti-probe] ignoring invalid datagram: {err}",
-						id = self.id(),
-						addr = self.inner.remote_address(),
-					);
-					// Silently drop — real H3 servers ignore unknown datagrams
-					// (RFC 9297)
-				} else {
-					debug!(
-						"[{id:#010x}] [{addr}] [{user}] handling incoming datagram error: {err}",
-						id = self.id(),
-						addr = self.inner.remote_address(),
-						user = self.auth,
-					);
-					self.close();
-				}
+				debug!(
+					"[{id:#010x}] [{addr}] [{user}] handling incoming datagram error: {err}",
+					id = self.id(),
+					addr = self.inner.remote_address(),
+					user = self.auth,
+				);
+				self.close();
 			}
 		}
 	}

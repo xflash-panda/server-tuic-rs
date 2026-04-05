@@ -2544,7 +2544,7 @@ dependencies = [
 
 [[package]]
 name = "server-tuic-agent"
-version = "0.3.4-alpha.6"
+version = "0.3.4"
 dependencies = [
  "acl-engine-r",
  "arc-swap",
@@ -2567,7 +2567,6 @@ dependencies = [
  "quinn 0.12.0",
  "quinn-congestions",
  "quinn-proto 0.12.0",
- "rand",
  "rcgen",
  "regex",
  "register-count",
@@ -2746,7 +2745,7 @@ dependencies = [
 
 [[package]]
 name = "tests"
-version = "0.3.4-alpha.6"
+version = "0.3.4"
 dependencies = [
  "aws-lc-rs",
  "eyre",
@@ -3253,7 +3252,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuic-core"
-version = "0.3.4-alpha.6"
+version = "0.3.4"
 dependencies = [
  "bytes",
  "eyre",

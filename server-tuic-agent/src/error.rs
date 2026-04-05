@@ -44,31 +44,6 @@ impl Error {
 	pub fn is_auth_failed(&self) -> bool {
 		matches!(self, Self::AuthFailed(_))
 	}
-
-	/// Whether this error should be silently dropped (no connection close) when
-	/// anti_probe is enabled. Mimics H3 server ignoring unknown stream types.
-	pub fn should_silent_drop_for_anti_probe(&self) -> bool {
-		matches!(self, Self::AuthFailed(_) | Self::DuplicatedAuth)
-	}
-
-	/// Whether this error is a task negotiation timeout.
-	/// When anti_probe is enabled, these should not close the connection —
-	/// a real H3 server would not close the entire connection because
-	/// one stream was slow to send data.
-	pub fn is_negotiation_timeout(&self) -> bool {
-		matches!(self, Self::TaskNegotiationTimeout)
-	}
-
-	/// Check if an error indicates a non-TUIC protocol probe on a datagram.
-	pub fn is_datagram_probe_error(&self) -> bool {
-		matches!(
-			self,
-			Self::Model(tuic::quinn::Error::UnmarshalDatagram(
-				tuic::UnmarshalError::InvalidVersion(_),
-				_
-			))
-		)
-	}
 }
 
 impl From<ConnectionError> for Error {
@@ -107,57 +82,5 @@ mod tests {
 		assert!(Error::LocallyClosed.is_trivial());
 		assert!(!Error::AuthFailed(Uuid::nil()).is_trivial());
 		assert!(!Error::DuplicatedAuth.is_trivial());
-	}
-
-	#[test]
-	fn test_should_silent_drop_for_anti_probe_auth_failed() {
-		let err = Error::AuthFailed(Uuid::nil());
-		assert!(
-			err.should_silent_drop_for_anti_probe(),
-			"AuthFailed should be silently dropped when anti_probe is enabled"
-		);
-	}
-
-	#[test]
-	fn test_should_silent_drop_for_anti_probe_duplicated_auth() {
-		assert!(
-			Error::DuplicatedAuth.should_silent_drop_for_anti_probe(),
-			"DuplicatedAuth should be silently dropped when anti_probe is enabled"
-		);
-	}
-
-	#[test]
-	fn test_should_not_silent_drop_for_other_errors() {
-		assert!(!Error::TimedOut.should_silent_drop_for_anti_probe());
-		assert!(!Error::LocallyClosed.should_silent_drop_for_anti_probe());
-		assert!(!Error::TaskNegotiationTimeout.should_silent_drop_for_anti_probe());
-	}
-
-	#[test]
-	fn test_is_negotiation_timeout() {
-		assert!(Error::TaskNegotiationTimeout.is_negotiation_timeout());
-		assert!(!Error::TimedOut.is_negotiation_timeout());
-		assert!(!Error::AuthFailed(Uuid::nil()).is_negotiation_timeout());
-		assert!(!Error::DuplicatedAuth.is_negotiation_timeout());
-	}
-
-	#[test]
-	fn test_is_datagram_probe_error_invalid_version() {
-		let model_err = tuic::quinn::Error::UnmarshalDatagram(
-			tuic::UnmarshalError::InvalidVersion(0x21),
-			bytes::Bytes::from_static(&[0x21, 0xDE, 0xAD]),
-		);
-		let err = Error::Model(model_err);
-		assert!(
-			err.is_datagram_probe_error(),
-			"InvalidVersion datagram should be detected as probe"
-		);
-	}
-
-	#[test]
-	fn test_is_datagram_probe_error_false_for_other_errors() {
-		assert!(!Error::TimedOut.is_datagram_probe_error());
-		assert!(!Error::DuplicatedAuth.is_datagram_probe_error());
-		assert!(!Error::TaskNegotiationTimeout.is_datagram_probe_error());
 	}
 }
