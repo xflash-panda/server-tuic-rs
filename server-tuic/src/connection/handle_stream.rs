@@ -74,18 +74,7 @@ impl Connection {
 					addr = self.inner.remote_address(),
 					user = self.auth,
 				);
-				// Anti-probe: on auth failure, don't close immediately.
-				// Let the auth timeout handle it so probes can't distinguish
-				// this server from a real HTTP/3 server by observing immediate
-				// connection close with error code 0.
-				if self.ctx.cfg.experimental.anti_probe && err.is_auth_failed() {
-					debug!(
-						"[{id:#010x}] [anti-probe] suppressing immediate close on auth failure",
-						id = self.id(),
-					);
-				} else {
-					self.close();
-				}
+				self.close();
 			}
 		}
 		drop(reg);

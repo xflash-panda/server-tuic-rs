@@ -15,7 +15,6 @@ use uuid::Uuid;
 use self::{authenticated::Authenticated, udp_session::UdpSession};
 use crate::{AppContext, UserConnections, error::Error, utils::UdpRelayMode};
 
-pub mod anti_probe;
 mod authenticated;
 mod handle_stream;
 mod handle_task;
@@ -62,11 +61,6 @@ impl Connection {
 					id = conn.id(),
 					user = conn.auth,
 				);
-
-				// Anti-probe: send fake HTTP/3 SETTINGS frame to disguise as HTTP/3 server
-				if ctx.cfg.experimental.anti_probe {
-					tokio::spawn(conn.clone().send_fake_h3_settings());
-				}
 
 				tokio::spawn(conn.clone().timeout_authenticate(ctx.cfg.auth_timeout));
 				tokio::spawn(conn.clone().collect_garbage());
@@ -209,34 +203,6 @@ impl Connection {
 				user = self.auth,
 			);
 			self.model.collect_garbage(self.ctx.cfg.gc_lifetime);
-		}
-	}
-
-	/// Send a fake HTTP/3 SETTINGS frame on a server-initiated uni-stream.
-	/// This makes the server appear as an HTTP/3 server to active probing
-	/// tools.
-	async fn send_fake_h3_settings(self) {
-		let frame = anti_probe::build_h3_settings_frame();
-		match self.inner.open_uni().await {
-			Ok(mut send) => {
-				if let Err(e) = send.write_all(&frame).await {
-					debug!(
-						"[{id:#010x}] [anti-probe] failed to write fake H3 SETTINGS: {e}",
-						id = self.id(),
-					);
-					return;
-				}
-				// Don't finish the stream - keep it open like a real HTTP/3 control stream
-				// The control stream stays open for the lifetime of the connection
-				// Hold it until connection closes
-				let _ = self.inner.closed().await;
-			}
-			Err(e) => {
-				debug!(
-					"[{id:#010x}] [anti-probe] failed to open uni-stream for fake H3 SETTINGS: {e}",
-					id = self.id(),
-				);
-			}
 		}
 	}
 
