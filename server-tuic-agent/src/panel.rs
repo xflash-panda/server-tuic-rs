@@ -75,6 +75,10 @@ pub struct PanelConfig {
 	pub data_dir:                 PathBuf,
 	/// Request timeout in seconds (default: 15)
 	pub request_timeout:          u64,
+	/// TLS server name (SNI) for panel connection
+	pub server_name:              String,
+	/// CA certificate path (None = use system trust store)
+	pub ca_cert_path:             Option<String>,
 }
 
 /// User information from server

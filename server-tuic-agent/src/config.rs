@@ -86,6 +86,14 @@ pub struct Cli {
 	#[arg(long = "timeout", value_name = "SECONDS", default_value = "15")]
 	pub request_timeout: u64,
 
+	/// TLS server name (SNI) for panel connection (defaults to --server_host)
+	#[arg(long = "panel_server_name", value_name = "NAME")]
+	pub panel_server_name: Option<String>,
+
+	/// CA certificate path for panel TLS (omit for system trust store)
+	#[arg(long = "panel_ca_cert_path", value_name = "PATH")]
+	pub panel_ca_cert_path: Option<String>,
+
 	/// Force refresh geoip and geosite databases on startup
 	#[arg(long = "refresh_geodata", default_value = "false")]
 	pub refresh_geodata: bool,
@@ -404,6 +412,7 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 		.ok_or_else(|| eyre::eyre!("--node <ID> is required when not using --init"))?;
 
 	// Set panel configuration (required fields)
+	let panel_server_name = cli.panel_server_name.unwrap_or_else(|| cli.host.clone());
 	config.panel = Some(crate::panel::PanelConfig {
 		server_host: cli.host,
 		server_port: cli.port,
@@ -413,6 +422,8 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 		heartbeat_interval: cli.heartbeat_interval,
 		data_dir: cli.data_dir,
 		request_timeout: cli.request_timeout,
+		server_name: panel_server_name,
+		ca_cert_path: cli.panel_ca_cert_path,
 	});
 
 	Ok(config)
