@@ -36,7 +36,7 @@ tuic = { package = "tuic-core", path = "../core", default-features = false, feat
 register-count = { version = "0.1.0", default-features = false, features = ["std"] }
 
 # Panel Connect RPC Client
-server-r-agent-proto = { path = "/Users/alex/code/rust/xflash-panda/server-r-agent-proto" }
+server-r-agent-proto = { git = "https://github.com/xflash-panda/server-r-agent-proto.git", tag = "v0.2.0" }
 server-r-client = { git = "https://github.com/xflash-panda/server-r-client", tag = "v0.1.11" }
 connectrpc = { version = "0.3", features = ["client"] }
 buffa = { version = "0.3", features = ["json"] }
