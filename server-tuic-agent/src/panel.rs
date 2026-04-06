@@ -1,13 +1,14 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashMap, net::ToSocketAddrs, path::PathBuf, sync::Arc, time::Duration};
 
+use connect_rust_h3::H3TransportBuilder;
+use connectrpc::client::{ClientConfig, ServiceTransport};
 use serde::{Deserialize, Serialize};
 use server_r_agent_proto::pkg::{
-	ConfigRequest, ConfigResponse, HeartbeatRequest, NodeType as GrpcNodeType, RegisterRequest as GrpcRegisterRequest,
-	SubmitRequest, UnregisterRequest, UsersRequest, VerifyRequest, agent_client::AgentClient,
+	AgentClient, ConfigRequest, HeartbeatRequest, NodeType as GrpcNodeType, RegisterRequest as GrpcRegisterRequest,
+	SubmitRequest, UnregisterRequest, UsersRequest, VerifyRequest,
 };
 use server_r_client::models::{NodeType, TuicConfig, parse_raw_config_response, unmarshal_users};
 use tokio::sync::RwLock;
-use tonic::transport::Channel;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -59,9 +60,9 @@ pub trait PanelService: Send + Sync {
 /// Configuration for the panel service
 #[derive(Debug, Clone)]
 pub struct PanelConfig {
-	/// gRPC server host (e.g., "127.0.0.1")
+	/// Panel server host (e.g., "127.0.0.1")
 	pub server_host:              String,
-	/// gRPC server port (e.g., 50051)
+	/// Panel server port (e.g., 50051)
 	pub server_port:              u16,
 	/// Node ID for this server
 	pub node_id:                  u32,
@@ -151,9 +152,11 @@ impl TrafficStats {
 /// Maps UUID -> user_id (i64)
 type UserMap = HashMap<Uuid, i64>;
 
-/// Panel service implementation using gRPC client
+type PanelClient = AgentClient<ServiceTransport<connect_rust_h3::H3Transport>>;
+
+/// Panel service implementation using Connect RPC over QUIC
 pub struct Panel {
-	client:      RwLock<Option<AgentClient<Channel>>>,
+	client:      RwLock<Option<PanelClient>>,
 	config:      PanelConfig,
 	running:     RwLock<bool>,
 	/// Registration ID obtained from API during init
@@ -174,30 +177,46 @@ impl Panel {
 		})
 	}
 
-	/// Connect to the gRPC server
-	async fn connect(&self) -> eyre::Result<AgentClient<Channel>> {
-		let endpoint = format!("http://{}:{}", self.config.server_host, self.config.server_port);
-		let timeout = Duration::from_secs(self.config.request_timeout);
+	/// Connect to the panel via QUIC/H3
+	async fn connect(&self) -> eyre::Result<PanelClient> {
+		let host_port = format!("{}:{}", self.config.server_host, self.config.server_port);
 		info!(
-			"Connecting to gRPC server at {} (timeout: {}s)",
-			endpoint, self.config.request_timeout
+			"Connecting to panel at {} (sni={}, ca={:?})",
+			host_port, self.config.server_name, self.config.ca_cert_path
 		);
 
-		let channel = Channel::from_shared(endpoint.clone())
-			.map_err(|e| eyre::eyre!("Invalid endpoint: {}", e))?
-			.connect_timeout(timeout)
-			.timeout(timeout)
-			.connect()
-			.await
-			.map_err(|e| eyre::eyre!("Failed to connect to gRPC server {}: {}", endpoint, e))?;
+		let addr = host_port
+			.to_socket_addrs()
+			.map_err(|e| eyre::eyre!("Failed to resolve {}: {}", host_port, e))?
+			.next()
+			.ok_or_else(|| eyre::eyre!("Failed to resolve {}", host_port))?;
 
-		let client = AgentClient::new(channel);
-		info!("Connected to gRPC server");
+		let mut builder = H3TransportBuilder::new()
+			.server_name(&self.config.server_name)
+			.keep_alive(Duration::from_secs(15));
+		if let Some(ref ca) = self.config.ca_cert_path {
+			builder = builder.ca_cert_path(ca);
+		}
+
+		let transport = builder
+			.build(addr)
+			.await
+			.map_err(|e| eyre::eyre!("Failed to build H3 transport to {}: {}", host_port, e))?;
+
+		let base_url = format!("https://{}:{}", self.config.server_name, self.config.server_port);
+		let config = ClientConfig::new(
+			base_url
+				.parse()
+				.map_err(|e| eyre::eyre!("Invalid base URL {}: {}", base_url, e))?,
+		);
+		let client = AgentClient::new(ServiceTransport::new(transport), config);
+
+		info!("Connected to panel via QUIC/H3");
 		Ok(client)
 	}
 
-	/// Get or create gRPC client
-	async fn get_client(&self) -> eyre::Result<AgentClient<Channel>> {
+	/// Get or create panel client
+	async fn get_client(&self) -> eyre::Result<PanelClient> {
 		let client_guard = self.client.read().await;
 		if let Some(client) = client_guard.clone() {
 			return Ok(client);
@@ -209,10 +228,10 @@ impl Panel {
 		Ok(client)
 	}
 
-	/// Reset the cached gRPC client to force reconnection on next request
+	/// Reset the cached panel client to force reconnection on next request
 	async fn reset_client(&self) {
 		*self.client.write().await = None;
-		warn!("gRPC client reset, will reconnect on next request");
+		warn!("Panel client reset, will reconnect on next request");
 	}
 
 	/// Get the node ID
@@ -283,30 +302,30 @@ impl Panel {
 		}
 	}
 
-	/// Fetch config from gRPC server
+	/// Fetch config from panel server
 	async fn fetch_config(&self) -> eyre::Result<TuicConfig> {
-		let mut client = self.get_client().await?;
-
-		let request = tonic::Request::new(ConfigRequest {
-			node_id:   self.config.node_id as i32,
-			node_type: GrpcNodeType::Tuic as i32,
-		});
+		let client = self.get_client().await?;
 
 		let response = client
-			.config(request)
+			.config(ConfigRequest {
+				node_id: self.config.node_id as i32,
+				node_type: GrpcNodeType::TUIC.into(),
+				..Default::default()
+			})
 			.await
-			.map_err(|e| eyre::eyre!("gRPC config request failed: {}", e))?;
+			.map_err(|e| eyre::eyre!("Connect RPC config request failed: {}", e))?;
 
-		let config_response: ConfigResponse = response.into_inner();
+		let resp = response.into_view();
 
-		if !config_response.result {
+		if !resp.result {
 			return Err(eyre::eyre!("Server returned failure for config request"));
 		}
 
-		let raw_data_str = String::from_utf8_lossy(&config_response.raw_data);
+		let raw_data: &[u8] = resp.raw_data;
+		let raw_data_str = String::from_utf8_lossy(raw_data);
 		debug!("Raw config data from server: {}", raw_data_str);
 
-		let node_config = parse_raw_config_response(NodeType::Tuic, &config_response.raw_data)
+		let node_config = parse_raw_config_response(NodeType::Tuic, raw_data)
 			.map_err(|e| eyre::eyre!("Failed to parse config: {} - raw_data: {}", e, raw_data_str))?;
 
 		let tuic_config = node_config
@@ -317,64 +336,62 @@ impl Panel {
 		Ok(tuic_config)
 	}
 
-	/// Register node with gRPC server
+	/// Register node with panel server
 	async fn register_node(&self, hostname: String, port: u16) -> eyre::Result<String> {
-		let mut client = self.get_client().await?;
-
-		let request = tonic::Request::new(GrpcRegisterRequest {
-			node_id:   self.config.node_id as i32,
-			node_type: GrpcNodeType::Tuic as i32,
-			host_name: hostname,
-			port:      port.to_string(),
-			ip:        String::new(),
-		});
+		let client = self.get_client().await?;
 
 		let response = client
-			.register(request)
+			.register(GrpcRegisterRequest {
+				node_id: self.config.node_id as i32,
+				node_type: GrpcNodeType::TUIC.into(),
+				host_name: hostname,
+				port: port.to_string(),
+				ip: String::new(),
+				..Default::default()
+			})
 			.await
-			.map_err(|e| eyre::eyre!("gRPC register request failed: {}", e))?;
+			.map_err(|e| eyre::eyre!("Connect RPC register request failed: {}", e))?;
 
-		Ok(response.into_inner().register_id)
+		Ok(response.into_view().register_id.to_string())
 	}
 
-	/// Verify register_id with gRPC server
+	/// Verify register_id with panel server
 	async fn verify_register_id(&self, register_id: &str) -> eyre::Result<bool> {
-		let mut client = self.get_client().await?;
-
-		let request = tonic::Request::new(VerifyRequest {
-			node_type:   GrpcNodeType::Tuic as i32,
-			register_id: register_id.to_string(),
-		});
+		let client = self.get_client().await?;
 
 		let response = client
-			.verify(request)
+			.verify(VerifyRequest {
+				node_type: GrpcNodeType::TUIC.into(),
+				register_id: register_id.to_string(),
+				..Default::default()
+			})
 			.await
-			.map_err(|e| eyre::eyre!("gRPC verify request failed: {}", e))?;
+			.map_err(|e| eyre::eyre!("Connect RPC verify request failed: {}", e))?;
 
-		Ok(response.into_inner().result)
+		Ok(response.into_view().result)
 	}
 
-	/// Fetch users from gRPC server and update local storage
+	/// Fetch users from panel server and update local storage
 	/// Returns the total number of users after update
 	/// If ctx is provided, will kick removed users' connections
 	async fn fetch_users(&self, ctx: Option<&AppContext>) -> eyre::Result<usize> {
-		let mut client = self.get_client().await?;
-
-		let request = tonic::Request::new(UsersRequest {
-			node_type: GrpcNodeType::Tuic as i32,
-			node_id:   self.config.node_id as i32,
-		});
+		let client = self.get_client().await?;
 
 		let response = client
-			.users(request)
+			.users(UsersRequest {
+				node_type: GrpcNodeType::TUIC.into(),
+				node_id: self.config.node_id as i32,
+				..Default::default()
+			})
 			.await
-			.map_err(|e| eyre::eyre!("gRPC users request failed: {}", e))?;
+			.map_err(|e| eyre::eyre!("Connect RPC users request failed: {}", e))?;
 
-		let users_response = response.into_inner();
-		let raw_data_str = String::from_utf8_lossy(&users_response.raw_data);
+		let resp = response.into_view();
+		let raw_data: &[u8] = resp.raw_data;
+		let raw_data_str = String::from_utf8_lossy(raw_data);
 		debug!("Raw users data from server: {}", raw_data_str);
 
-		let parsed_users = unmarshal_users(&users_response.raw_data)
+		let parsed_users = unmarshal_users(raw_data)
 			.map_err(|e| eyre::eyre!("Failed to parse users response: {} - raw_data: {}", e, raw_data_str))?;
 
 		let users: Vec<User> = parsed_users
@@ -447,24 +464,23 @@ impl Panel {
 		Ok(count)
 	}
 
-	/// Send heartbeat to gRPC server
+	/// Send heartbeat to panel server
 	async fn send_heartbeat(&self) -> eyre::Result<()> {
 		let register_id = self.register_id.read().await.clone();
 		let register_id = register_id.ok_or_else(|| eyre::eyre!("No register_id available"))?;
 
-		let mut client = self.get_client().await?;
-
-		let request = tonic::Request::new(HeartbeatRequest {
-			node_type: GrpcNodeType::Tuic as i32,
-			register_id,
-		});
+		let client = self.get_client().await?;
 
 		let response = client
-			.heartbeat(request)
+			.heartbeat(HeartbeatRequest {
+				node_type: GrpcNodeType::TUIC.into(),
+				register_id,
+				..Default::default()
+			})
 			.await
-			.map_err(|e| eyre::eyre!("gRPC heartbeat request failed: {}", e))?;
+			.map_err(|e| eyre::eyre!("Connect RPC heartbeat request failed: {}", e))?;
 
-		if response.into_inner().result {
+		if response.into_view().result {
 			info!("Heartbeat sent successfully");
 			Ok(())
 		} else {
@@ -472,7 +488,7 @@ impl Panel {
 		}
 	}
 
-	/// Submit traffic statistics to gRPC server
+	/// Submit traffic statistics to panel server
 	/// Only resets counters on successful submission to avoid data loss
 	async fn submit_traffic(&self, ctx: &AppContext) -> eyre::Result<()> {
 		let register_id = self.register_id.read().await.clone();
@@ -504,22 +520,20 @@ impl Panel {
 		let raw_data = serde_json::to_vec(&traffic_list).map_err(|e| eyre::eyre!("Failed to serialize traffic data: {}", e))?;
 		let raw_stats = serde_json::to_vec(&stats).map_err(|e| eyre::eyre!("Failed to serialize traffic stats: {}", e))?;
 
-		let mut client = self.get_client().await?;
-
-		let request = tonic::Request::new(SubmitRequest {
-			node_type: GrpcNodeType::Tuic as i32,
-			register_id,
-			raw_data,
-			raw_stats,
-		});
+		let client = self.get_client().await?;
 
 		let response = client
-			.submit(request)
+			.submit(SubmitRequest {
+				node_type: GrpcNodeType::TUIC.into(),
+				register_id,
+				raw_data,
+				raw_stats,
+				..Default::default()
+			})
 			.await
-			.map_err(|e| eyre::eyre!("gRPC submit request failed: {}", e))?;
+			.map_err(|e| eyre::eyre!("Connect RPC submit request failed: {}", e))?;
 
-		if response.into_inner().result {
-			// Only reset counters after successful submission
+		if response.into_view().result {
 			crate::stats::reset_all_traffic(ctx).await;
 			info!("Traffic submitted successfully ({} users)", count);
 			Ok(())
@@ -529,21 +543,20 @@ impl Panel {
 		}
 	}
 
-	/// Unregister node from gRPC server
+	/// Unregister node from panel server
 	async fn unregister_node(&self, register_id: &str) -> eyre::Result<()> {
-		let mut client = self.get_client().await?;
-
-		let request = tonic::Request::new(UnregisterRequest {
-			node_type:   GrpcNodeType::Tuic as i32,
-			register_id: register_id.to_string(),
-		});
+		let client = self.get_client().await?;
 
 		let response = client
-			.unregister(request)
+			.unregister(UnregisterRequest {
+				node_type: GrpcNodeType::TUIC.into(),
+				register_id: register_id.to_string(),
+				..Default::default()
+			})
 			.await
-			.map_err(|e| eyre::eyre!("gRPC unregister request failed: {}", e))?;
+			.map_err(|e| eyre::eyre!("Connect RPC unregister request failed: {}", e))?;
 
-		if response.into_inner().result {
+		if response.into_view().result {
 			info!("Node unregistered successfully");
 			Ok(())
 		} else {
@@ -621,7 +634,7 @@ impl PanelService for Panel {
 			}
 		}
 
-		// Fetch config from gRPC server if needed
+		// Fetch config from panel server if needed
 		if need_fetch_config {
 			let tuic_config = self.fetch_config().await.map_err(|e| {
 				error!("Failed to fetch config from server: {}", e);
@@ -761,7 +774,7 @@ impl PanelService for Panel {
 							error!("Periodic user fetch failed: {}", e);
 						}
 						Err(_) => {
-							error!("Periodic user fetch timed out after {}s, resetting gRPC client", task_timeout.as_secs());
+							error!("Periodic user fetch timed out after {}s, resetting panel client", task_timeout.as_secs());
 							self.reset_client().await;
 						}
 					}
@@ -774,7 +787,7 @@ impl PanelService for Panel {
 							error!("Heartbeat failed: {}", e);
 						}
 						Err(_) => {
-							error!("Heartbeat timed out after {}s, resetting gRPC client", task_timeout.as_secs());
+							error!("Heartbeat timed out after {}s, resetting panel client", task_timeout.as_secs());
 							self.reset_client().await;
 						}
 					}
@@ -787,7 +800,7 @@ impl PanelService for Panel {
 							error!("Traffic submission failed: {}", e);
 						}
 						Err(_) => {
-							error!("Traffic submission timed out after {}s, resetting gRPC client", task_timeout.as_secs());
+							error!("Traffic submission timed out after {}s, resetting panel client", task_timeout.as_secs());
 							self.reset_client().await;
 						}
 					}
