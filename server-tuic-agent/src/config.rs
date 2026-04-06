@@ -54,11 +54,11 @@ pub struct Cli {
 	#[arg(long = "log_mode", value_name = "MODE", default_value = "info")]
 	pub log_mode: LogLevel,
 
-	/// gRPC server host (e.g., "127.0.0.1")
+	/// Panel server host (e.g., "127.0.0.1")
 	#[arg(long = "server_host", value_name = "HOST", default_value = "127.0.0.1")]
 	pub host: String,
 
-	/// gRPC server port (e.g., 8082)
+	/// Panel server port (e.g., 8082)
 	#[arg(long = "port", value_name = "PORT", default_value = "8082")]
 	pub port: u16,
 
@@ -82,17 +82,17 @@ pub struct Cli {
 	#[arg(long = "data_dir", value_name = "PATH", default_value = "/var/lib/tuic-agent-node")]
 	pub data_dir: PathBuf,
 
-	/// gRPC request timeout (in seconds)
+	/// Panel request timeout (in seconds)
 	#[arg(long = "timeout", value_name = "SECONDS", default_value = "15")]
 	pub request_timeout: u64,
 
 	/// TLS server name (SNI) for panel connection (defaults to --server_host)
-	#[arg(long = "panel_server_name", value_name = "NAME")]
-	pub panel_server_name: Option<String>,
+	#[arg(long = "server_name", value_name = "NAME")]
+	pub server_name: Option<String>,
 
 	/// CA certificate path for panel TLS (omit for system trust store)
-	#[arg(long = "panel_ca_cert_path", value_name = "PATH")]
-	pub panel_ca_cert_path: Option<String>,
+	#[arg(long = "ca_cert", value_name = "PATH")]
+	pub ca_cert: Option<String>,
 
 	/// Force refresh geoip and geosite databases on startup
 	#[arg(long = "refresh_geodata", default_value = "false")]
@@ -412,7 +412,7 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 		.ok_or_else(|| eyre::eyre!("--node <ID> is required when not using --init"))?;
 
 	// Set panel configuration (required fields)
-	let panel_server_name = cli.panel_server_name.unwrap_or_else(|| cli.host.clone());
+	let server_name = cli.server_name.unwrap_or_else(|| cli.host.clone());
 	config.panel = Some(crate::panel::PanelConfig {
 		server_host: cli.host,
 		server_port: cli.port,
@@ -422,8 +422,8 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 		heartbeat_interval: cli.heartbeat_interval,
 		data_dir: cli.data_dir,
 		request_timeout: cli.request_timeout,
-		server_name: panel_server_name,
-		ca_cert_path: cli.panel_ca_cert_path,
+		server_name,
+		ca_cert_path: cli.ca_cert,
 	});
 
 	Ok(config)

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::ToSocketAddrs, path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use connect_rust_h3::H3TransportBuilder;
 use connectrpc::client::{ClientConfig, ServiceTransport};
@@ -7,7 +7,9 @@ use server_r_agent_proto::pkg::{
 	AgentClient, ConfigRequest, HeartbeatRequest, NodeType as GrpcNodeType, RegisterRequest as GrpcRegisterRequest,
 	SubmitRequest, UnregisterRequest, UsersRequest, VerifyRequest,
 };
-use server_r_client::models::{NodeType, TuicConfig, parse_raw_config_response, unmarshal_users};
+use server_r_client::models::{
+	NodeType, TrafficStats, TuicConfig, UserTraffic, parse_raw_config_response, unmarshal_users,
+};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -82,72 +84,6 @@ pub struct PanelConfig {
 	pub ca_cert_path:             Option<String>,
 }
 
-/// User information from server
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct User {
-	pub id:   i64,
-	pub uuid: String,
-}
-
-/// User traffic data for submission
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserTraffic {
-	pub user_id: i64,
-	/// Upload bytes
-	pub u:       u64,
-	/// Download bytes
-	pub d:       u64,
-	/// Count/connections
-	#[serde(default)]
-	pub n:       u64,
-}
-
-impl UserTraffic {
-	/// Create a new UserTraffic instance with connection count
-	pub fn with_count(user_id: i64, upload: u64, download: u64, count: u64) -> Self {
-		Self {
-			user_id,
-			u: upload,
-			d: download,
-			n: count,
-		}
-	}
-}
-
-/// Aggregated traffic statistics
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct TrafficStats {
-	/// Total count
-	pub count:         i64,
-	/// Total requests
-	pub requests:      i64,
-	/// User IDs
-	pub user_ids:      Vec<i64>,
-	/// Per-user request counts
-	#[serde(default)]
-	pub user_requests: std::collections::HashMap<i64, i64>,
-}
-
-impl TrafficStats {
-	/// Create a new empty TrafficStats instance
-	pub fn new() -> Self {
-		Self {
-			count:         0,
-			requests:      0,
-			user_ids:      Vec::new(),
-			user_requests: std::collections::HashMap::new(),
-		}
-	}
-
-	/// Add a user's request count
-	pub fn add_user(&mut self, user_id: i64, requests: i64) {
-		self.user_ids.push(user_id);
-		self.user_requests.insert(user_id, requests);
-		self.requests += requests;
-		self.count += 1;
-	}
-}
-
 /// User data stored in Panel
 /// Maps UUID -> user_id (i64)
 type UserMap = HashMap<Uuid, i64>;
@@ -158,7 +94,6 @@ type PanelClient = AgentClient<ServiceTransport<connect_rust_h3::H3Transport>>;
 pub struct Panel {
 	client:      RwLock<Option<PanelClient>>,
 	config:      PanelConfig,
-	running:     RwLock<bool>,
 	/// Registration ID obtained from API during init
 	register_id: RwLock<Option<String>>,
 	/// User data: UUID -> user_id mapping
@@ -171,7 +106,6 @@ impl Panel {
 		Ok(Self {
 			client: RwLock::new(None),
 			config,
-			running: RwLock::new(false),
 			register_id: RwLock::new(None),
 			users: RwLock::new(HashMap::new()),
 		})
@@ -185,8 +119,8 @@ impl Panel {
 			host_port, self.config.server_name, self.config.ca_cert_path
 		);
 
-		let addr = host_port
-			.to_socket_addrs()
+		let addr = tokio::net::lookup_host(&host_port)
+			.await
 			.map_err(|e| eyre::eyre!("Failed to resolve {}: {}", host_port, e))?
 			.next()
 			.ok_or_else(|| eyre::eyre!("Failed to resolve {}", host_port))?;
@@ -391,16 +325,8 @@ impl Panel {
 		let raw_data_str = String::from_utf8_lossy(raw_data);
 		debug!("Raw users data from server: {}", raw_data_str);
 
-		let parsed_users = unmarshal_users(raw_data)
+		let users = unmarshal_users(raw_data)
 			.map_err(|e| eyre::eyre!("Failed to parse users response: {} - raw_data: {}", e, raw_data_str))?;
-
-		let users: Vec<User> = parsed_users
-			.into_iter()
-			.map(|u| User {
-				id:   u.id,
-				uuid: u.uuid,
-			})
-			.collect();
 
 		// Build new user map from response
 		let mut new_user_map: UserMap = HashMap::new();
@@ -719,10 +645,6 @@ impl PanelService for Panel {
 	}
 
 	async fn run(&self, ctx: Arc<AppContext>) -> eyre::Result<()> {
-		{
-			*self.running.write().await = true;
-		}
-
 		info!("Panel service running...");
 
 		let fetch_interval = Duration::from_secs(self.config.fetch_users_interval);
@@ -814,10 +736,6 @@ impl PanelService for Panel {
 
 	async fn close(&self) -> eyre::Result<()> {
 		info!("Panel service closing...");
-
-		{
-			*self.running.write().await = false;
-		}
 
 		// Unregister node if we have a register_id
 		let register_id = self.register_id.read().await.clone();
