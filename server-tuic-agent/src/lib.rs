@@ -81,6 +81,42 @@ impl AppContext {
 	}
 }
 
+/// Wrapper that ensures a tokio Runtime is always shut down via
+/// `spawn_blocking`, preventing the "Cannot drop a runtime in a context
+/// where blocking is not allowed" panic.
+struct BlockingShutdownRuntime(Option<tokio::runtime::Runtime>);
+
+impl BlockingShutdownRuntime {
+	fn new(rt: tokio::runtime::Runtime) -> Self {
+		Self(Some(rt))
+	}
+
+	fn handle(&self) -> &tokio::runtime::Handle {
+		self.0.as_ref().expect("runtime already taken").handle()
+	}
+
+	/// Shutdown the runtime gracefully. Must be called from async context.
+	async fn shutdown(mut self) {
+		if let Some(rt) = self.0.take() {
+			let _ = tokio::task::spawn_blocking(move || {
+				rt.shutdown_timeout(Duration::from_secs(10));
+			})
+			.await;
+		}
+	}
+}
+
+impl Drop for BlockingShutdownRuntime {
+	fn drop(&mut self) {
+		if let Some(rt) = self.0.take() {
+			// Fallback: if shutdown() was not called, use a background thread
+			std::thread::spawn(move || {
+				rt.shutdown_timeout(Duration::from_secs(10));
+			});
+		}
+	}
+}
+
 /// Run the TUIC server with the given configuration
 pub async fn run(mut cfg: Config) -> eyre::Result<()> {
 	// Initialize panel service if configured
@@ -103,13 +139,16 @@ pub async fn run(mut cfg: Config) -> eyre::Result<()> {
 	panel_service.init(&mut cfg).await?;
 
 	// Build dedicated runtime for Panel service to isolate HTTP I/O
-	// from the TUIC server's thread pool
-	let panel_runtime = tokio::runtime::Builder::new_multi_thread()
-		.worker_threads(2)
-		.thread_name("panel-rt")
-		.enable_all()
-		.build()
-		.map_err(|e| eyre::eyre!("Failed to build panel runtime: {}", e))?;
+	// from the TUIC server's thread pool.
+	// Wrapped in BlockingShutdownRuntime to prevent panic on async drop.
+	let panel_runtime = BlockingShutdownRuntime::new(
+		tokio::runtime::Builder::new_multi_thread()
+			.worker_threads(2)
+			.thread_name("panel-rt")
+			.enable_all()
+			.build()
+			.map_err(|e| eyre::eyre!("Failed to build panel runtime: {}", e))?,
+	);
 	let panel_runtime_handle = panel_runtime.handle().clone();
 
 	// Spawn run_inner in a separate task to catch panics
@@ -146,8 +185,8 @@ pub async fn run(mut cfg: Config) -> eyre::Result<()> {
 		Err(e) => error!("Panel close task panicked: {}", e),
 	}
 
-	// Shutdown the panel runtime
-	panel_runtime.shutdown_timeout(Duration::from_secs(10));
+	// Gracefully shutdown the panel runtime
+	panel_runtime.shutdown().await;
 
 	result
 }

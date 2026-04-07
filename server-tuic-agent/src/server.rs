@@ -12,7 +12,7 @@ use quinn::{
 use quinn_congestions::bbr::BbrConfig;
 use rustls::ServerConfig as RustlsServerConfig;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use tracing::{debug, warn};
+use tracing::{debug, info};
 
 use crate::{
 	AppContext, congestion::SafePacingFactory, connection::Connection, error::Error, tls::CertResolver,
@@ -114,7 +114,7 @@ impl Server {
 	}
 
 	pub async fn start(&self) {
-		warn!("server started, listening on {}", self.ep.local_addr().unwrap());
+		info!("server started, listening on {}", self.ep.local_addr().unwrap());
 
 		loop {
 			match self.ep.accept().await {

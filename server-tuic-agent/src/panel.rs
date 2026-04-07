@@ -7,9 +7,7 @@ use server_r_agent_proto::pkg::{
 	AgentClient, ConfigRequest, HeartbeatRequest, NodeType as GrpcNodeType, RegisterRequest as GrpcRegisterRequest,
 	SubmitRequest, UnregisterRequest, UsersRequest, VerifyRequest,
 };
-use server_r_client::models::{
-	NodeType, TrafficStats, TuicConfig, UserTraffic, parse_raw_config_response, unmarshal_users,
-};
+use server_r_client::models::{NodeType, TrafficStats, TuicConfig, UserTraffic, parse_raw_config_response, unmarshal_users};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
