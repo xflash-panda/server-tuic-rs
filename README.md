@@ -37,7 +37,8 @@ cargo build --release -p server-tuic-agent --features jemallocator
 ## 运行
 
 ```bash
-server-tuic-agent --server_host panel.example.com --port 8082 --node 1
+server-tuic-agent --node 1 --server_host panel.example.com --port 8082 \
+  --cert_file /path/to/server.crt --key_file /path/to/server.key
 ```
 
 ### 命令行参数
@@ -45,14 +46,14 @@ server-tuic-agent --server_host panel.example.com --port 8082 --node 1
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
 | `--node <ID>` | 节点 ID | **必需** |
+| `--cert_file <PATH>` | TUIC 服务 TLS 证书文件路径 | `/root/.cert/server.crt` |
+| `--key_file <PATH>` | TUIC 服务 TLS 私钥文件路径 | `/root/.cert/server.key` |
 | `--server_host <HOST>` | 面板服务器地址 | `127.0.0.1` |
 | `--port <PORT>` | 面板服务器端口 | `8082` |
-| `--server_name <NAME>` | TLS SNI 服务器名称 | 同 `--server_host` |
-| `--ca_cert <PATH>` | CA 证书路径（自签证书时使用，不指定则使用系统信任链） | - |
+| `--server_name <NAME>` | 面板连接 TLS SNI 名称 | 同 `--server_host` |
+| `--ca_file <PATH>` | 面板 CA 证书路径（自签证书时使用，不指定则使用系统信任链） | - |
 | `--ext_conf_file <PATH>` | 外部配置文件路径 (TOML) | - |
 | `--acl_conf_file <PATH>` | ACL 路由配置文件路径 (YAML) | - |
-| `--cert_file <PATH>` | TLS 证书文件路径 | `/root/.cert/server.crt` |
-| `--key_file <PATH>` | TLS 私钥文件路径 | `/root/.cert/server.key` |
 | `--log_mode <LEVEL>` | 日志级别 | `info` |
 | `--timeout <SECS>` | 请求超时时间 | `15` |
 | `--fetch_users_interval <SECS>` | 用户列表刷新间隔 | `60` |
@@ -62,22 +63,26 @@ server-tuic-agent --server_host panel.example.com --port 8082 --node 1
 | `--refresh_geodata` | 启动时强制刷新 GeoIP/GeoSite 数据库 | `false` |
 | `--init` | 生成示例配置文件 | - |
 
+> **注意**: `--cert_file` 和 `--key_file` 用于 TUIC QUIC 服务端 TLS，证书必须包含 `extendedKeyUsage=serverAuth` 扩展，否则 rustls 会拒绝。
+
 ### CA 证书配置
 
 面板通信使用 QUIC (HTTP/3) 传输，TLS 证书验证方式：
 
-- **公链 CA**：不指定 `--ca_cert`，自动使用系统信任链
-- **自签 CA**：`--ca_cert /path/to/ca.crt`
+- **公链 CA**：不指定 `--ca_file`，自动使用系统信任链
+- **自签 CA**：`--ca_file /path/to/ca.crt`
 - **SNI**：`--server_name my-server.com`（不填默认使用 `--server_host` 的值）
 
 ```bash
 # 公链 CA（系统信任链）
-server-tuic-agent --server_host panel.example.com --port 8082 --node 1
+server-tuic-agent --node 1 --server_host panel.example.com --port 8082 \
+  --cert_file /path/to/server.crt --key_file /path/to/server.key
 
 # 自签 CA
-server-tuic-agent --server_host 10.0.0.1 --port 8082 --node 1 \
+server-tuic-agent --node 1 --server_host 10.0.0.1 --port 8082 \
+  --cert_file /path/to/server.crt --key_file /path/to/server.key \
   --server_name panel.example.com \
-  --ca_cert /path/to/ca.crt
+  --ca_file /path/to/ca.crt
 ```
 
 ### 快速开始
@@ -93,7 +98,9 @@ server-tuic-agent --init
 
 3. 启动服务:
 ```bash
-server-tuic-agent --node 1 --ext_conf_file config.toml --acl_conf_file acl.yaml
+server-tuic-agent --node 1 \
+  --cert_file /path/to/server.crt --key_file /path/to/server.key \
+  --ext_conf_file config.toml --acl_conf_file acl.yaml
 ```
 
 详细配置请参阅 [server-tuic-agent/README.md](server-tuic-agent/README.md)
