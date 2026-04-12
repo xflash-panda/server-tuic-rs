@@ -65,10 +65,10 @@ impl Connection {
 				return Ok(());
 			}
 
-			// Convert Address to acl-engine-r Addr
+			// Convert Address to acl-engine-rs Addr
 			let mut acl_addr = address_to_acl_addr(conn.addr());
 
-			// Use acl-engine-r's async outbound to dial TCP
+			// Use acl-engine-rs's async outbound to dial TCP
 			let tcp_conn = outbound
 				.as_async_outbound()
 				.dial_tcp(&mut acl_addr)
@@ -152,14 +152,14 @@ impl Connection {
 				None => {
 					// No match, use default direct
 					std::sync::Arc::new(OutboundHandler::Direct(std::sync::Arc::new(
-						acl_engine_r::outbound::Direct::new(),
+						acl_engine_rs::outbound::Direct::new(),
 					)))
 				}
 			}
 		} else {
 			// No ACL engine, use default direct
 			std::sync::Arc::new(OutboundHandler::Direct(std::sync::Arc::new(
-				acl_engine_r::outbound::Direct::new(),
+				acl_engine_rs::outbound::Direct::new(),
 			)))
 		}
 	}
@@ -250,7 +250,7 @@ impl Connection {
 				return Ok(());
 			}
 
-			// Use acl-engine-r's async outbound to get UDP connection
+			// Use acl-engine-rs's async outbound to get UDP connection
 			let mut acl_addr = address_to_acl_addr(&addr);
 			let udp_conn = outbound
 				.as_async_outbound()
@@ -291,7 +291,7 @@ impl Connection {
 				return Ok(());
 			}
 
-			// Drop the UDP connection from acl-engine-r (we use our own UdpSession)
+			// Drop the UDP connection from acl-engine-rs (we use our own UdpSession)
 			drop(udp_conn);
 
 			// Record traffic and request stats for UDP outbound
@@ -379,7 +379,7 @@ impl Connection {
 	}
 }
 
-/// Convert tuic Address to acl-engine-r Addr
+/// Convert tuic Address to acl-engine-rs Addr
 fn address_to_acl_addr(addr: &Address) -> Addr {
 	match addr {
 		Address::DomainAddress(domain, port) => Addr::new(domain.as_str(), *port),

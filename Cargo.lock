@@ -3,9 +3,9 @@
 version = 4
 
 [[package]]
-name = "acl-engine-r"
-version = "0.4.1"
-source = "git+https://github.com/xflash-panda/acl-engine-r?tag=v0.4.2#a27ce7cbf2ae1654c165258c4791ea74a2fb71bb"
+name = "acl-engine-rs"
+version = "0.4.3"
+source = "git+https://github.com/xflash-panda/acl-engine-rs?tag=v0.4.3#4fc70425b7cb9a62bbc80964fe242042d011103c"
 dependencies = [
  "async-trait",
  "base64",
@@ -2353,9 +2353,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "server-r-client"
-version = "0.1.7"
-source = "git+https://github.com/xflash-panda/server-r-client.git?tag=v0.1.7#ad66648e37f4f8dd766456d00aaf745b62c23080"
+name = "server-client-rs"
+version = "0.1.12"
+source = "git+https://github.com/xflash-panda/server-client-rs?tag=v0.1.12#b53e894577087de6c8f5c39f9cb411dfdab8378e"
 dependencies = [
  "reqwest",
  "serde",
@@ -2367,24 +2367,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "server-r-client"
-version = "0.1.11"
-source = "git+https://github.com/xflash-panda/server-r-client.git?tag=v0.1.11#9c86618ba6db662283afb29dd10e85fad509ce0b"
+name = "server-tuic-rs"
+version = "0.3.5"
 dependencies = [
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "server-tuic"
-version = "0.3.4"
-dependencies = [
- "acl-engine-r",
+ "acl-engine-rs",
  "arc-swap",
  "async-trait",
  "aws-lc-rs",
@@ -2412,7 +2398,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "server-r-client 0.1.11",
+ "server-client-rs",
  "socket2 0.6.3",
  "tempfile",
  "thiserror 2.0.18",
@@ -2423,7 +2409,7 @@ dependencies = [
  "toml 0.9.12+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
- "tuic",
+ "tuic-core",
  "uuid",
 ]
 
@@ -2580,7 +2566,7 @@ dependencies = [
 
 [[package]]
 name = "tests"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "aws-lc-rs",
  "eyre",
@@ -2589,12 +2575,12 @@ dependencies = [
  "lexopt",
  "rustls",
  "serial_test",
- "server-r-client 0.1.7",
- "server-tuic",
+ "server-client-rs",
+ "server-tuic-rs",
  "tokio",
  "tracing",
  "tracing-test",
- "tuic",
+ "tuic-core",
  "uuid",
 ]
 
@@ -3001,8 +2987,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
-name = "tuic"
-version = "0.3.4"
+name = "tuic-core"
+version = "0.3.5"
 dependencies = [
  "bytes",
  "eyre",
@@ -3018,7 +3004,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tracing",
- "tuic",
+ "tuic-core",
  "uuid",
 ]
 

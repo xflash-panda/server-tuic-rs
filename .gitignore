@@ -11,3 +11,6 @@ client.json
 client.json5
 lcov.info
 config.toml
+.cert/
+docs/plans/
+docs/superpowers/

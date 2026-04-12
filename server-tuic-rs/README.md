@@ -15,8 +15,8 @@
 ## 安装
 
 ```bash
-git clone https://github.com/xflash-panda/server-tuic.git
-cd server-tuic
+git clone https://github.com/xflash-panda/server-tuic-rs.git
+cd server-tuic-rs
 
 # 编译 (默认使用 aws-lc-rs)
 cargo build --release -p tuic-server

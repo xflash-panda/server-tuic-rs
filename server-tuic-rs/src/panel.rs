@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use serde::{Deserialize, Serialize};
-use server_r_client::{ApiClient, ApiError, Config as ApiConfig, NodeConfigEnum, NodeType, RegisterRequest, UserTraffic};
+use server_client_rs::{ApiClient, ApiError, Config as ApiConfig, NodeConfigEnum, NodeType, RegisterRequest, UserTraffic};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -75,7 +75,7 @@ pub struct PanelConfig {
 /// Maps UUID -> user_id (i64)
 type UserMap = HashMap<Uuid, i64>;
 
-/// Panel service implementation using server-r-client
+/// Panel service implementation using server-client-rs
 pub struct Panel {
 	client:      ApiClient,
 	config:      PanelConfig,

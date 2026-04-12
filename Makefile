@@ -1,4 +1,4 @@
-# Makefile for server-tuic project
+# Makefile for server-tuic-rs project
 # 便于测试、调试和构建
 
 .PHONY: help build build-release build-agent build-agent-release test test-agent check check-agent clean run run-agent fmt clippy install
@@ -8,8 +8,8 @@
 
 # 项目配置
 CARGO := cargo
-PACKAGE := server-tuic
-BINARY_NAME := server-tuic
+PACKAGE := server-tuic-rs
+BINARY_NAME := server-tuic-rs
 TARGET_DIR := target
 
 # 颜色输出
@@ -21,7 +21,7 @@ NC := \033[0m # No Color
 ##@ 帮助信息
 
 help: ## 显示帮助信息
-	@echo "$(GREEN)Server-TUIC Makefile$(NC)"
+	@echo "$(GREEN)Server-TUIC-RS Makefile$(NC)"
 	@echo ""
 	@awk 'BEGIN {FS = ":.*##"; printf "使用方法:\n  make $(YELLOW)<target>$(NC)\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2 } /^##@/ { printf "\n$(YELLOW)%s$(NC)\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 

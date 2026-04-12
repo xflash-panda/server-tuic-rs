@@ -1,7 +1,7 @@
 use std::process;
 
 use clap::Parser;
-use server_tuic::config::{Cli, Control, parse_config};
+use server_tuic_rs::config::{Cli, Control, parse_config};
 #[cfg(feature = "jemallocator")]
 use tikv_jemallocator::Jemalloc;
 use tracing::level_filters::LevelFilter;
@@ -13,7 +13,7 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-	// Install default crypto provider for rustls (required by server-r-client)
+	// Install default crypto provider for rustls (required by server-client-rs)
 	#[cfg(feature = "ring")]
 	let _ = rustls::crypto::ring::default_provider().install_default();
 	#[cfg(all(feature = "aws-lc-rs", not(feature = "ring")))]
@@ -35,7 +35,7 @@ async fn main() -> eyre::Result<()> {
 		.with_targets(vec![
 			("tuic", cfg.log_mode),
 			("tuic_quinn", cfg.log_mode),
-			("server_tuic", cfg.log_mode),
+			("server_tuic_rs", cfg.log_mode),
 		])
 		.with_default(LevelFilter::INFO);
 	let registry = tracing_subscriber::registry();
@@ -46,7 +46,7 @@ async fn main() -> eyre::Result<()> {
 		)))
 		.try_init()?;
 
-	server_tuic::run(cfg).await?;
+	server_tuic_rs::run(cfg).await?;
 
 	Ok(())
 }

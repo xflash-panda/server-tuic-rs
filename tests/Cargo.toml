@@ -10,14 +10,14 @@ publish = false
 
 [features]
 default = ["aws-lc-rs"]
-ring = ["tuic/ring", "rustls/ring", "server-tuic/ring"]
-aws-lc-rs = ["tuic/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "server-tuic/aws-lc-rs"]
+ring = ["tuic/ring", "rustls/ring", "server-tuic-rs/ring"]
+aws-lc-rs = ["tuic/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "server-tuic-rs/aws-lc-rs"]
 deplog = ["tracing-test/no-env-filter"]
 
 [dependencies]
 # Core dependencies for integration tests
-tuic = { path = "../tuic", default-features = false, features = ["async_marshal", "marshal", "model"] }
-server-tuic = { path = "../server-tuic", default-features = false }
+tuic = { package = "tuic-core", path = "../core", default-features = false, features = ["async_marshal", "marshal", "model"] }
+server-tuic-rs = { path = "../server-tuic-rs", default-features = false }
 
 # Required dependencies
 uuid = { version = "1", features = ["v4", "serde", "std"] }
@@ -31,4 +31,4 @@ tracing-test = { version = "0.2" }
 tracing = "0.1"
 serial_test = "3"
 aws-lc-rs = { version = "1", default-features = false, optional = true, features = ["prebuilt-nasm"] }
-server-r-client = { git = "https://github.com/xflash-panda/server-r-client.git", tag = "v0.1.7" }
+server-client-rs = { git = "https://github.com/xflash-panda/server-client-rs", tag = "v0.1.12" }
