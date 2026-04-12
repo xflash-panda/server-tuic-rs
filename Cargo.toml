@@ -1,5 +1,5 @@
 [workspace]
-members = ["core", "server-tuic-agent", "tests"]
+members = ["core", "server-tuic-rs-agent", "tests"]
 resolver = "2"
 
 [workspace.package]
@@ -9,7 +9,7 @@ rust-version = "1.85.0"
 edition = "2024"
 readme = "README.md"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/Itsusinn/tuic"
+repository = "https://github.com/xflash-panda/server-tuic-rs"
 
 [workspace.dependencies]
 quinn = { branch = "bbrv3", git = "https://github.com/Tipuch/quinn.git", default-features = false }

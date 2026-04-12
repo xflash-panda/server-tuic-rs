@@ -3,11 +3,11 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 use connect_rust_h3::H3TransportBuilder;
 use connectrpc::client::{ClientConfig, ServiceTransport};
 use serde::{Deserialize, Serialize};
-use server_r_agent_proto::pkg::{
+use server_agent_proto_rs::pkg::{
 	AgentClient, ConfigRequest, HeartbeatRequest, NodeType as GrpcNodeType, RegisterRequest as GrpcRegisterRequest,
 	SubmitRequest, UnregisterRequest, UsersRequest, VerifyRequest,
 };
-use server_r_client::models::{NodeType, TrafficStats, TuicConfig, UserTraffic, parse_raw_config_response, unmarshal_users};
+use server_client_rs::models::{NodeType, TrafficStats, TuicConfig, UserTraffic, parse_raw_config_response, unmarshal_users};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;

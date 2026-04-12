@@ -21,23 +21,23 @@ Fork 自 https://github.com/tuic-protocol/tuic
 
 ```bash
 # 默认 (aws-lc-rs)
-cargo build --release -p server-tuic-agent
+cargo build --release -p server-tuic-rs-agent
 
 # 使用 ring
-cargo build --release -p server-tuic-agent --no-default-features --features ring
+cargo build --release -p server-tuic-rs-agent --no-default-features --features ring
 
 # 启用 JEMalloc
-cargo build --release -p server-tuic-agent --features jemallocator
+cargo build --release -p server-tuic-rs-agent --features jemallocator
 ```
 
-编译产物: `target/release/server-tuic-agent`
+编译产物: `target/release/server-tuic-rs-agent`
 
 ---
 
 ## 运行
 
 ```bash
-server-tuic-agent --node 1 --server_host panel.example.com --port 8082 \
+server-tuic-rs-agent --node 1 --server_host panel.example.com --port 8082 \
   --cert_file /path/to/server.crt --key_file /path/to/server.key
 ```
 
@@ -75,11 +75,11 @@ server-tuic-agent --node 1 --server_host panel.example.com --port 8082 \
 
 ```bash
 # 公链 CA（系统信任链）
-server-tuic-agent --node 1 --server_host panel.example.com --port 8082 \
+server-tuic-rs-agent --node 1 --server_host panel.example.com --port 8082 \
   --cert_file /path/to/server.crt --key_file /path/to/server.key
 
 # 自签 CA
-server-tuic-agent --node 1 --server_host 10.0.0.1 --port 8082 \
+server-tuic-rs-agent --node 1 --server_host 10.0.0.1 --port 8082 \
   --cert_file /path/to/server.crt --key_file /path/to/server.key \
   --server_name panel.example.com \
   --ca_file /path/to/ca.crt
@@ -89,7 +89,7 @@ server-tuic-agent --node 1 --server_host 10.0.0.1 --port 8082 \
 
 1. 生成示例配置文件:
 ```bash
-server-tuic-agent --init
+server-tuic-rs-agent --init
 ```
 
 2. 根据需要修改配置文件:
@@ -98,12 +98,13 @@ server-tuic-agent --init
 
 3. 启动服务:
 ```bash
-server-tuic-agent --node 1 \
+server-tuic-rs-agent --node 1 \
   --cert_file /path/to/server.crt --key_file /path/to/server.key \
   --ext_conf_file config.toml --acl_conf_file acl.yaml
 ```
 
-详细配置请参阅 [server-tuic-agent/README.md](server-tuic-agent/README.md)
+详细配置请参阅 [server-tuic-rs-agent/README.md](server-tuic-rs-agent/README.md)
+
 
 ---
 

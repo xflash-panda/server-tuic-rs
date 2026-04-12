@@ -13,3 +13,4 @@ lcov.info
 config.toml
 docs/plans/
 .cert/
+.docs/superpowers/

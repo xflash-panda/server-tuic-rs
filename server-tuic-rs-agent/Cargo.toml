@@ -1,5 +1,5 @@
 [package]
-name = "server-tuic-agent"
+name = "server-tuic-rs-agent"
 version.workspace = true
 authors.workspace = true
 description = "Minimalistic TUIC server implementation as a reference"
@@ -36,8 +36,8 @@ tuic = { package = "tuic-core", path = "../core", default-features = false, feat
 register-count = { version = "0.1.0", default-features = false, features = ["std"] }
 
 # Panel Connect RPC Client
-server-r-agent-proto = { git = "https://github.com/xflash-panda/server-r-agent-proto.git", tag = "v0.2.0" }
-server-r-client = { git = "https://github.com/xflash-panda/server-r-client", tag = "v0.1.11" }
+server-agent-proto-rs = { git = "https://github.com/xflash-panda/server-agent-proto-rs.git", tag = "v0.2.1" }
+server-client-rs = { git = "https://github.com/xflash-panda/server-client-rs", tag = "v0.1.12" }
 connectrpc = { version = "0.3", features = ["client"] }
 buffa = { version = "0.3", features = ["json"] }
 connect-rust-h3 = { git = "https://github.com/xflash-panda/connect-rust-h3", tag = "v0.2.0" }
@@ -68,7 +68,7 @@ pest = "2.8"
 pest_derive = "2.8"
 
 # ACL Engine
-acl-engine-r = { git = "https://github.com/xflash-panda/acl-engine-r", tag = "v0.4.2" }
+acl-engine-rs = { git = "https://github.com/xflash-panda/acl-engine-rs", tag = "v0.4.3" }
 
 # Logging
 time = { version = "0.3", features = ["macros", "local-offset"] }

@@ -1,4 +1,4 @@
-# Makefile for server-tuic project
+# Makefile for server-tuic-rs project
 # 便于测试、调试和构建
 
 .PHONY: help build build-release build-agent build-agent-release test test-agent check check-agent clean run run-agent fmt clippy install
@@ -8,8 +8,8 @@
 
 # 项目配置
 CARGO := cargo
-PACKAGE_AGENT := server-tuic-agent
-BINARY_NAME_AGENT := server-tuic-agent
+PACKAGE_AGENT := server-tuic-rs-agent
+BINARY_NAME_AGENT := server-tuic-rs-agent
 TARGET_DIR := target
 
 # 颜色输出

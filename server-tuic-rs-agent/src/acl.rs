@@ -1,7 +1,7 @@
 use std::{collections::HashMap, num::NonZero, path::Path, sync::Arc, time::Duration};
 
-// Re-export types from acl-engine-r
-pub use acl_engine_r::{
+// Re-export types from acl-engine-rs
+pub use acl_engine_rs::{
 	AutoGeoLoader,
 	GeoIpFormat,
 	GeoSiteFormat,
@@ -172,13 +172,13 @@ pub struct AclRules {
 /// Wrapper for async outbound handlers from acl-engine-r
 #[derive(Clone)]
 pub enum OutboundHandler {
-	/// Direct connection using acl-engine-r's Direct
+	/// Direct connection using acl-engine-rs's Direct
 	Direct(Arc<Direct>),
-	/// SOCKS5 proxy using acl-engine-r's Socks5
+	/// SOCKS5 proxy using acl-engine-rs's Socks5
 	Socks5 { inner: Arc<Socks5>, allow_udp: bool },
-	/// HTTP proxy using acl-engine-r's Http
+	/// HTTP proxy using acl-engine-rs's Http
 	Http(Arc<Http>),
-	/// Reject connection using acl-engine-r's Reject
+	/// Reject connection using acl-engine-rs's Reject
 	Reject(Arc<Reject>),
 }
 
@@ -272,7 +272,7 @@ impl OutboundHandler {
 /// ACL Engine wrapper
 pub struct AclEngine {
 	// Compiled rule set from acl-engine-r
-	compiled:  acl_engine_r::CompiledRuleSet<Arc<OutboundHandler>>,
+	compiled:  acl_engine_rs::CompiledRuleSet<Arc<OutboundHandler>>,
 	// Keep outbounds map for reference
 	outbounds: HashMap<String, Arc<OutboundHandler>>,
 }
@@ -317,7 +317,7 @@ impl AclEngine {
 
 		// Parse rules text
 		let rules_text = rules.join("\n");
-		let text_rules = acl_engine_r::parse_rules(&rules_text).with_context(|| "Failed to parse ACL rules")?;
+		let text_rules = acl_engine_rs::parse_rules(&rules_text).with_context(|| "Failed to parse ACL rules")?;
 
 		// Create AutoGeoLoader with MMDB for GeoIP and Sing (DB) for GeoSite
 		let mut geo_loader = AutoGeoLoader::new()
@@ -331,7 +331,7 @@ impl AclEngine {
 		}
 
 		// Compile rules with outbound map and AutoGeoLoader
-		let compiled = acl_engine_r::compile(&text_rules, &outbounds, NonZero::new(1024).unwrap(), &geo_loader)
+		let compiled = acl_engine_rs::compile(&text_rules, &outbounds, NonZero::new(1024).unwrap(), &geo_loader)
 			.with_context(|| "Failed to compile ACL rules")?;
 
 		tracing::info!(
@@ -348,11 +348,11 @@ impl AclEngine {
 		// Create HostInfo from domain or IP
 		let host_info = if let Ok(ip) = host.parse::<std::net::IpAddr>() {
 			match ip {
-				std::net::IpAddr::V4(v4) => acl_engine_r::HostInfo::new("", Some(v4), None),
-				std::net::IpAddr::V6(v6) => acl_engine_r::HostInfo::new("", None, Some(v6)),
+				std::net::IpAddr::V4(v4) => acl_engine_rs::HostInfo::new("", Some(v4), None),
+				std::net::IpAddr::V6(v6) => acl_engine_rs::HostInfo::new("", None, Some(v6)),
 			}
 		} else {
-			acl_engine_r::HostInfo::from_name(host)
+			acl_engine_rs::HostInfo::from_name(host)
 		};
 
 		// Match against compiled rules
