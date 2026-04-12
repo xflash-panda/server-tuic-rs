@@ -2668,7 +2668,7 @@ dependencies = [
 
 [[package]]
 name = "server-tuic-rs-agent"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "acl-engine-rs",
  "arc-swap",
@@ -2872,7 +2872,7 @@ dependencies = [
 
 [[package]]
 name = "tests"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "aws-lc-rs",
  "eyre",
@@ -3309,7 +3309,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuic-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "bytes",
  "eyre",
