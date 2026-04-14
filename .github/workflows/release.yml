@@ -59,6 +59,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Configure private deps access
+        run: git config --global url."https://x-access-token:${{ secrets.GH_PRIVATE_DEPS_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -83,6 +86,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}-${{ matrix.cross && 'cross' || 'cargo' }}
+
+      - name: Pre-fetch dependencies
+        if: matrix.cross
+        run: cargo fetch
 
       - name: Build (cross)
         if: matrix.cross
