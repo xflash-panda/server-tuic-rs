@@ -135,19 +135,14 @@ impl Connection {
 	fn get_outbound_handler(&self, addr: &Address, protocol: Protocol) -> std::sync::Arc<OutboundHandler> {
 		if let Some(acl_engine) = &self.ctx.cfg.acl_engine {
 			// Extract host and port from address
-			let (host, port) = match addr {
-				Address::DomainAddress(domain, port) => (domain.as_str(), *port),
-				Address::SocketAddress(addr) => {
-					// Convert IP to string for matching
-					let ip_str = addr.ip().to_string();
-					// Leak string to get &'static str (acceptable for IP addresses)
-					(Box::leak(ip_str.into_boxed_str()) as &str, addr.port())
-				}
-				Address::None => ("", 0),
+			let (host_owned, port) = match addr {
+				Address::DomainAddress(domain, port) => (domain.clone(), *port),
+				Address::SocketAddress(addr) => (addr.ip().to_string(), addr.port()),
+				Address::None => (String::new(), 0),
 			};
 
 			// Match using ACL engine
-			match acl_engine.match_host(host, port, protocol) {
+			match acl_engine.match_host(&host_owned, port, protocol) {
 				Some(handler) => handler,
 				None => {
 					// No match, use default direct

@@ -156,7 +156,11 @@ impl Connection {
 		debug!("[{id:#010x}] [{uuid}] registered in online clients", id = conn_id,);
 	}
 
-	/// Unregister this connection from the online clients registry
+	/// Unregister this connection from the online clients registry.
+	///
+	/// To avoid a race condition where a concurrent `register_client` inserts
+	/// into the same Arc between our `drop(conns)` and `remove()`, we hold
+	/// the write lock while removing from the cache when the map is empty.
 	async fn unregister_client(&self) {
 		if let Some(uuid) = self.auth.get() {
 			let conn_id = self.id() as usize;
@@ -165,11 +169,12 @@ impl Connection {
 				let mut conns = user_conns.write().await;
 				conns.remove(&conn_id);
 
-				// If no more connections for this user, remove the user entry
+				// Remove from cache while still holding the lock to prevent
+				// a concurrent register_client from inserting into the old Arc.
 				if conns.is_empty() {
-					drop(conns); // Release lock before removing from outer cache
 					self.ctx.online_clients.remove(&uuid).await;
 				}
+				drop(conns);
 
 				debug!("[{id:#010x}] [{uuid}] unregistered from online clients", id = conn_id,);
 			}

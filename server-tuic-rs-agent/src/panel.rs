@@ -65,26 +65,10 @@ impl PanelApi for TuicPanelApi {
 		if let Some(ref new_users) = result {
 			// Compute UUIDs to kick BEFORE rebuilding the map.
 			// After rebuild, removed users' UUIDs are gone from the map.
-			let new_ids: HashSet<i64> = new_users.iter().map(|u| u.id).collect();
-			let new_uuid_by_id: HashMap<i64, &str> = new_users.iter().map(|u| (u.id, u.uuid.as_str())).collect();
-
-			let mut kicks = Vec::new();
-			{
+			let kicks = {
 				let old_map = self.users.read().await;
-				for (uuid, uid) in old_map.iter() {
-					if !new_ids.contains(uid) {
-						// User removed
-						kicks.push(*uuid);
-					} else if let Some(new_uuid_str) = new_uuid_by_id.get(uid) {
-						// User exists but UUID may have changed
-						if let Ok(new_uuid) = Uuid::parse_str(new_uuid_str) {
-							if &new_uuid != uuid {
-								kicks.push(*uuid);
-							}
-						}
-					}
-				}
-			}
+				compute_kicks(&old_map, new_users)
+			};
 
 			*self.pending_kicks.write().await = kicks;
 
@@ -308,6 +292,32 @@ impl Panel {
 	}
 }
 
+/// Compute which UUIDs should be kicked based on the old UUID map and new user list.
+///
+/// A UUID is kicked when:
+/// - The user_id no longer exists in the new user list (user removed)
+/// - The user_id exists but its UUID has changed (UUID rotation)
+fn compute_kicks(old_map: &UserMap, new_users: &[User]) -> Vec<Uuid> {
+	let new_ids: HashSet<i64> = new_users.iter().map(|u| u.id).collect();
+	let new_uuid_by_id: HashMap<i64, &str> = new_users.iter().map(|u| (u.id, u.uuid.as_str())).collect();
+
+	let mut kicks = Vec::new();
+	for (uuid, uid) in old_map.iter() {
+		if !new_ids.contains(uid) {
+			// User removed
+			kicks.push(*uuid);
+		} else if let Some(new_uuid_str) = new_uuid_by_id.get(uid) {
+			// User exists but UUID may have changed
+			if let Ok(new_uuid) = Uuid::parse_str(new_uuid_str) {
+				if &new_uuid != uuid {
+					kicks.push(*uuid);
+				}
+			}
+		}
+	}
+	kicks
+}
+
 /// Rebuild the UUID -> user_id map from a list of users
 async fn rebuild_uuid_map(users_lock: &RwLock<UserMap>, users: &[User]) {
 	let mut user_map = users_lock.write().await;
@@ -397,5 +407,220 @@ impl OptionalPanel {
 			warn!("Panel service is disabled, skipping close");
 			Ok(())
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn make_user(id: i64, uuid: &str) -> User {
+		User {
+			id,
+			uuid: uuid.to_string(),
+		}
+	}
+
+	fn make_uuid_map(entries: &[(Uuid, i64)]) -> UserMap {
+		entries.iter().cloned().collect()
+	}
+
+	// ── compute_kicks tests ──────────────────────────────────────────────
+
+	#[test]
+	fn test_compute_kicks_no_change() {
+		let uuid1 = Uuid::new_v4();
+		let uuid2 = Uuid::new_v4();
+		let old_map = make_uuid_map(&[(uuid1, 1), (uuid2, 2)]);
+		let new_users = vec![
+			make_user(1, &uuid1.to_string()),
+			make_user(2, &uuid2.to_string()),
+		];
+
+		let kicks = compute_kicks(&old_map, &new_users);
+		assert!(kicks.is_empty(), "No users changed, no kicks expected");
+	}
+
+	#[test]
+	fn test_compute_kicks_user_removed() {
+		let uuid1 = Uuid::new_v4();
+		let uuid2 = Uuid::new_v4();
+		let old_map = make_uuid_map(&[(uuid1, 1), (uuid2, 2)]);
+		// User 2 removed from new list
+		let new_users = vec![make_user(1, &uuid1.to_string())];
+
+		let kicks = compute_kicks(&old_map, &new_users);
+		assert_eq!(kicks.len(), 1);
+		assert_eq!(kicks[0], uuid2);
+	}
+
+	#[test]
+	fn test_compute_kicks_all_users_removed() {
+		let uuid1 = Uuid::new_v4();
+		let uuid2 = Uuid::new_v4();
+		let old_map = make_uuid_map(&[(uuid1, 1), (uuid2, 2)]);
+		let new_users = vec![];
+
+		let kicks = compute_kicks(&old_map, &new_users);
+		assert_eq!(kicks.len(), 2);
+		assert!(kicks.contains(&uuid1));
+		assert!(kicks.contains(&uuid2));
+	}
+
+	#[test]
+	fn test_compute_kicks_uuid_changed() {
+		let old_uuid = Uuid::new_v4();
+		let new_uuid = Uuid::new_v4();
+		let old_map = make_uuid_map(&[(old_uuid, 1)]);
+		// Same user_id but different UUID
+		let new_users = vec![make_user(1, &new_uuid.to_string())];
+
+		let kicks = compute_kicks(&old_map, &new_users);
+		assert_eq!(kicks.len(), 1);
+		assert_eq!(kicks[0], old_uuid, "Old UUID should be kicked");
+	}
+
+	#[test]
+	fn test_compute_kicks_new_user_added() {
+		let uuid1 = Uuid::new_v4();
+		let uuid_new = Uuid::new_v4();
+		let old_map = make_uuid_map(&[(uuid1, 1)]);
+		// Existing user stays, new user added
+		let new_users = vec![
+			make_user(1, &uuid1.to_string()),
+			make_user(2, &uuid_new.to_string()),
+		];
+
+		let kicks = compute_kicks(&old_map, &new_users);
+		assert!(kicks.is_empty(), "New user should not cause any kicks");
+	}
+
+	#[test]
+	fn test_compute_kicks_empty_old_map() {
+		let old_map = make_uuid_map(&[]);
+		let new_users = vec![make_user(1, &Uuid::new_v4().to_string())];
+
+		let kicks = compute_kicks(&old_map, &new_users);
+		assert!(kicks.is_empty(), "Empty old map should produce no kicks");
+	}
+
+	#[test]
+	fn test_compute_kicks_mixed_changes() {
+		let uuid1 = Uuid::new_v4();
+		let uuid2 = Uuid::new_v4();
+		let uuid3 = Uuid::new_v4();
+		let new_uuid2 = Uuid::new_v4();
+		let old_map = make_uuid_map(&[(uuid1, 1), (uuid2, 2), (uuid3, 3)]);
+		let new_users = vec![
+			make_user(1, &uuid1.to_string()),        // unchanged
+			make_user(2, &new_uuid2.to_string()),     // UUID changed
+			// user 3 removed
+			make_user(4, &Uuid::new_v4().to_string()), // new user
+		];
+
+		let kicks = compute_kicks(&old_map, &new_users);
+		assert_eq!(kicks.len(), 2);
+		assert!(kicks.contains(&uuid2), "Changed UUID should be kicked");
+		assert!(kicks.contains(&uuid3), "Removed user should be kicked");
+		assert!(!kicks.contains(&uuid1), "Unchanged user should not be kicked");
+	}
+
+	#[test]
+	fn test_compute_kicks_invalid_new_uuid_no_kick() {
+		let uuid1 = Uuid::new_v4();
+		let old_map = make_uuid_map(&[(uuid1, 1)]);
+		// New user has invalid UUID format - the parse fails, so no kick
+		let new_users = vec![make_user(1, "not-a-valid-uuid")];
+
+		let kicks = compute_kicks(&old_map, &new_users);
+		assert!(kicks.is_empty(), "Invalid new UUID should not trigger a kick");
+	}
+
+	// ── rebuild_uuid_map tests ───────────────────────────────────────────
+
+	#[tokio::test]
+	async fn test_rebuild_uuid_map_basic() {
+		let users_lock = RwLock::new(HashMap::new());
+		let uuid1 = Uuid::new_v4();
+		let uuid2 = Uuid::new_v4();
+
+		let users = vec![
+			make_user(1, &uuid1.to_string()),
+			make_user(2, &uuid2.to_string()),
+		];
+
+		rebuild_uuid_map(&users_lock, &users).await;
+
+		let map = users_lock.read().await;
+		assert_eq!(map.len(), 2);
+		assert_eq!(map.get(&uuid1), Some(&1));
+		assert_eq!(map.get(&uuid2), Some(&2));
+	}
+
+	#[tokio::test]
+	async fn test_rebuild_uuid_map_replaces_old_entries() {
+		let old_uuid = Uuid::new_v4();
+		let new_uuid = Uuid::new_v4();
+		let users_lock = RwLock::new(HashMap::from([(old_uuid, 99)]));
+
+		let users = vec![make_user(1, &new_uuid.to_string())];
+
+		rebuild_uuid_map(&users_lock, &users).await;
+
+		let map = users_lock.read().await;
+		assert_eq!(map.len(), 1);
+		assert!(map.get(&old_uuid).is_none(), "Old UUID should be gone");
+		assert_eq!(map.get(&new_uuid), Some(&1));
+	}
+
+	#[tokio::test]
+	async fn test_rebuild_uuid_map_skips_invalid_uuids() {
+		let users_lock = RwLock::new(HashMap::new());
+		let valid_uuid = Uuid::new_v4();
+
+		let users = vec![
+			make_user(1, &valid_uuid.to_string()),
+			make_user(2, "invalid-uuid"),
+		];
+
+		rebuild_uuid_map(&users_lock, &users).await;
+
+		let map = users_lock.read().await;
+		assert_eq!(map.len(), 1);
+		assert_eq!(map.get(&valid_uuid), Some(&1));
+	}
+
+	#[tokio::test]
+	async fn test_rebuild_uuid_map_empty_list_clears_map() {
+		let uuid = Uuid::new_v4();
+		let users_lock = RwLock::new(HashMap::from([(uuid, 1)]));
+
+		rebuild_uuid_map(&users_lock, &[]).await;
+
+		let map = users_lock.read().await;
+		assert!(map.is_empty());
+	}
+
+	// ── OptionalPanel tests ──────────────────────────────────────────────
+
+	#[test]
+	fn test_optional_panel_disabled() {
+		let panel = OptionalPanel::disabled();
+		assert!(!panel.is_enabled());
+		assert!(panel.panel().is_none());
+		assert!(panel.stats_collector().is_none());
+	}
+
+	#[tokio::test]
+	async fn test_optional_panel_disabled_validate_user() {
+		let panel = OptionalPanel::disabled();
+		let uuid = Uuid::new_v4();
+		assert_eq!(panel.validate_user(&uuid).await, None);
+	}
+
+	#[tokio::test]
+	async fn test_optional_panel_disabled_get_all_user_ids() {
+		let panel = OptionalPanel::disabled();
+		assert!(panel.get_all_user_ids().await.is_empty());
 	}
 }
