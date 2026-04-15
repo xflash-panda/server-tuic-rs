@@ -4,6 +4,6 @@ passthrough = ["RUSTFLAGS", "RUST_LOG", "CARGO_NET_GIT_FETCH_WITH_CLI", "GH_PAT"
 # All cross targets use Debian-based images
 [build]
 pre-build = [
-    "apt-get update && apt-get install -y git",
+    "apt-get update && apt-get install -y git protobuf-compiler",
     "git config --global url.\"https://${GH_PAT}@github.com/\".insteadOf \"https://github.com/\""
 ]
