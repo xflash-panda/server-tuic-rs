@@ -68,9 +68,6 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Configure git for private repos
-        run: git config --global url."https://${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
-
       - name: Install cross
         if: matrix.cross
         run: cargo install cross --git https://github.com/cross-rs/cross
@@ -86,7 +83,7 @@ jobs:
       - name: Build (cross)
         if: matrix.cross
         env:
-          GH_PAT: ${{ secrets.GH_PAT }}
+          GH_PAT: ${{ secrets.GH_PRIVATE_DEPS_TOKEN }}
         run: cross build --release -p server-tuic-rs --target ${{ matrix.target }}
 
       - name: Build (cargo)
