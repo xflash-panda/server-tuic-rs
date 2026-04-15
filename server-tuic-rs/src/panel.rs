@@ -1,54 +1,15 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
-use serde::{Deserialize, Serialize};
-use server_client_rs::{ApiClient, ApiError, Config as ApiConfig, NodeConfigEnum, NodeType, RegisterRequest, UserTraffic};
+use panel_core::{
+	BackgroundTasks, BackgroundTasksHandle, NodeConfigEnum, PanelApi, StatsCollector, TaskConfig, User, UserManager,
+};
+use panel_http::{HttpApiManager, HttpPanelConfig};
+use server_client_rs::models::TuicConfig;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::{AppContext, utils::CongestionController};
-
-/// State file name
-const STATE_FILE: &str = "state.json";
-
-/// Persistent state for the panel
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct PanelState {
-	/// Registration ID obtained from API
-	register_id:        Option<String>,
-	/// Node ID from API config
-	node_id:            Option<i64>,
-	/// Server port from API config
-	server_port:        Option<u16>,
-	/// Zero RTT handshake setting from API config
-	zero_rtt_handshake: Option<bool>,
-	/// Congestion control algorithm from API config
-	#[serde(default)]
-	congestion_control: Option<String>,
-}
-
-fn get_hostname() -> String {
-	hostname::get()
-		.map(|h| h.to_string_lossy().to_string())
-		.unwrap_or_else(|_| "unknown".to_string())
-}
-
-/// Trait defining the lifecycle of a panel service
-#[async_trait::async_trait]
-pub trait PanelService: Send + Sync {
-	/// Initialize the service (called before server starts)
-	/// Updates the config with values fetched from panel API (e.g.,
-	/// server_port)
-	async fn init(&self, cfg: &mut crate::Config) -> eyre::Result<()>;
-
-	/// Run the service (called while server is running)
-	/// This method should be spawned as a background task
-	/// The ctx parameter provides access to traffic statistics
-	async fn run(&self, ctx: Arc<AppContext>) -> eyre::Result<()>;
-
-	/// Close the service (called when server is shutting down)
-	async fn close(&self) -> eyre::Result<()>;
-}
 
 /// Configuration for the panel service
 #[derive(Debug, Clone)]
@@ -71,249 +32,125 @@ pub struct PanelConfig {
 	pub data_dir:                 PathBuf,
 }
 
-/// User data stored in Panel
-/// Maps UUID -> user_id (i64)
+/// User map: UUID -> user_id (i64), maintained separately for TUIC's UUID-based
+/// auth
 type UserMap = HashMap<Uuid, i64>;
 
-/// Panel service implementation using server-client-rs
+/// Wrapper around HttpApiManager that intercepts fetch_users()
+/// to also update the TUIC-specific UUID -> user_id map.
+///
+/// Key ordering: on fetch_users(), we compute which UUIDs will be kicked
+/// (removed/uuid-changed) BEFORE rebuilding the UUID map, then store them
+/// in `pending_kicks` for the on_user_diff callback to consume.
+struct TuicPanelApi {
+	inner:         HttpApiManager,
+	/// Shared UUID map updated on every user fetch
+	users:         Arc<RwLock<UserMap>>,
+	/// UUIDs that should be kicked after the next user diff.
+	/// Computed during fetch_users() while old UUID map is still available.
+	pending_kicks: Arc<RwLock<Vec<Uuid>>>,
+}
+
+#[async_trait::async_trait]
+impl PanelApi for TuicPanelApi {
+	async fn initialize(&self, port: u16) -> anyhow::Result<()> {
+		self.inner.initialize(port).await
+	}
+
+	async fn fetch_users(&self) -> anyhow::Result<Option<Vec<User>>> {
+		let result = self.inner.fetch_users().await?;
+		if let Some(ref new_users) = result {
+			// Compute UUIDs to kick BEFORE rebuilding the map.
+			// After rebuild, removed users' UUIDs are gone from the map.
+			let kicks = {
+				let old_map = self.users.read().await;
+				compute_kicks(&old_map, new_users)
+			};
+
+			*self.pending_kicks.write().await = kicks;
+
+			// Now rebuild the UUID map with new users
+			rebuild_uuid_map(&self.users, new_users).await;
+		}
+		Ok(result)
+	}
+
+	async fn submit_traffic(&self, data: Vec<panel_core::UserTraffic>) -> anyhow::Result<()> {
+		self.inner.submit_traffic(data).await
+	}
+
+	async fn heartbeat(&self) -> anyhow::Result<()> {
+		self.inner.heartbeat().await
+	}
+
+	async fn unregister(&self) -> anyhow::Result<()> {
+		self.inner.unregister().await
+	}
+
+	async fn fetch_config(&self) -> anyhow::Result<NodeConfigEnum> {
+		self.inner.fetch_config().await
+	}
+}
+
+/// Panel service implementation backed by server-panel-rs (HTTP transport)
 pub struct Panel {
-	client:      ApiClient,
-	config:      PanelConfig,
-	running:     RwLock<bool>,
-	/// Registration ID obtained from API during init
-	register_id: RwLock<Option<String>>,
-	/// User data: UUID -> user_id mapping
-	users:       RwLock<UserMap>,
+	api:             Arc<TuicPanelApi>,
+	config:          PanelConfig,
+	user_manager:    Arc<UserManager>,
+	stats_collector: Arc<StatsCollector>,
 }
 
 impl Panel {
 	/// Create a new Panel instance
 	pub fn new(config: PanelConfig) -> eyre::Result<Self> {
-		let api_config = ApiConfig::new(&config.api_host, &config.token).with_timeout(Duration::from_secs(config.timeout));
+		let http_config = HttpPanelConfig {
+			api:             config.api_host.clone(),
+			token:           config.token.clone(),
+			node_id:         config.node_id as i64,
+			node_type:       panel_core::NodeType::Tuic,
+			api_timeout:     config.timeout,
+			debug:           false,
+			state_file_path: config.data_dir.join("state"),
+		};
 
-		let client = ApiClient::new(api_config).map_err(|e| eyre::eyre!("Failed to create API client: {}", e))?;
+		let users: Arc<RwLock<UserMap>> = Arc::new(RwLock::new(HashMap::new()));
+		let pending_kicks: Arc<RwLock<Vec<Uuid>>> = Arc::new(RwLock::new(Vec::new()));
+
+		let http_api = HttpApiManager::new(http_config).map_err(|e| eyre::eyre!("Failed to create HTTP API client: {}", e))?;
+
+		let api = Arc::new(TuicPanelApi {
+			inner:         http_api,
+			users:         users.clone(),
+			pending_kicks: pending_kicks.clone(),
+		});
+		let user_manager = Arc::new(UserManager::new());
+		let stats_collector = Arc::new(StatsCollector::new());
 
 		Ok(Self {
-			client,
+			api,
 			config,
-			running: RwLock::new(false),
-			register_id: RwLock::new(None),
-			users: RwLock::new(HashMap::new()),
+			user_manager,
+			stats_collector,
 		})
 	}
 
-	/// Get a reference to the API client
-	pub fn client(&self) -> &ApiClient {
-		&self.client
-	}
-
-	/// Get the node ID
-	pub fn node_id(&self) -> u32 {
-		self.config.node_id
+	/// Get a reference to the StatsCollector
+	pub fn stats_collector(&self) -> &Arc<StatsCollector> {
+		&self.stats_collector
 	}
 
 	/// Validate a user by UUID, returns the user_id if valid
 	pub async fn validate_user(&self, uuid: &Uuid) -> Option<i64> {
-		self.users.read().await.get(uuid).copied()
+		self.api.users.read().await.get(uuid).copied()
 	}
 
 	/// Get all user IDs (for traffic stats initialization)
 	pub async fn get_all_user_ids(&self) -> Vec<i64> {
-		self.users.read().await.values().copied().collect()
+		self.api.users.read().await.values().copied().collect()
 	}
 
-	/// Get the state file path
-	fn state_file_path(&self) -> PathBuf {
-		self.config.data_dir.join(STATE_FILE)
-	}
-
-	/// Load state from file
-	fn load_state(&self) -> Option<PanelState> {
-		let path = self.state_file_path();
-		if !path.exists() {
-			return None;
-		}
-
-		match std::fs::read_to_string(&path) {
-			Ok(content) => match serde_json::from_str(&content) {
-				Ok(state) => {
-					info!("Loaded state from {:?}", path);
-					Some(state)
-				}
-				Err(e) => {
-					warn!("Failed to parse state file: {}", e);
-					None
-				}
-			},
-			Err(e) => {
-				warn!("Failed to read state file: {}", e);
-				None
-			}
-		}
-	}
-
-	/// Save state to file
-	fn save_state(&self, state: &PanelState) -> eyre::Result<()> {
-		let path = self.state_file_path();
-		let content = serde_json::to_string_pretty(state).map_err(|e| eyre::eyre!("Failed to serialize state: {}", e))?;
-
-		std::fs::write(&path, content).map_err(|e| eyre::eyre!("Failed to write state file {:?}: {}", path, e))?;
-
-		info!("Saved state to {:?}", path);
-		Ok(())
-	}
-
-	/// Delete state file
-	fn delete_state(&self) {
-		let path = self.state_file_path();
-		if path.exists() {
-			if let Err(e) = std::fs::remove_file(&path) {
-				warn!("Failed to delete state file {:?}: {}", path, e);
-			} else {
-				info!("Deleted state file {:?}", path);
-			}
-		}
-	}
-
-	/// Fetch users from API and update local storage
-	/// Returns the total number of users after update
-	/// If ctx is provided, will kick removed users' connections
-	async fn fetch_users(&self, ctx: Option<&AppContext>) -> eyre::Result<usize> {
-		let register_id = self.register_id.read().await.clone();
-		let register_id = register_id.ok_or_else(|| eyre::eyre!("No register_id available"))?;
-
-		match self.client.users(NodeType::Tuic, &register_id).await {
-			Ok(users) => {
-				// Build new user map from API response
-				let mut new_user_map: UserMap = HashMap::new();
-				for user in &users {
-					if let Ok(uuid) = Uuid::parse_str(&user.uuid) {
-						new_user_map.insert(uuid, user.id);
-					} else {
-						warn!("Invalid UUID format for user {}: {}", user.id, user.uuid);
-					}
-				}
-
-				// Compare with existing users and update
-				let mut user_map = self.users.write().await;
-
-				// Find users to remove (exist in current but not in new)
-				let removed: Vec<Uuid> = user_map
-					.keys()
-					.filter(|uuid| !new_user_map.contains_key(*uuid))
-					.copied()
-					.collect();
-
-				// Find users to add (exist in new but not in current)
-				let added: Vec<Uuid> = new_user_map
-					.keys()
-					.filter(|uuid| !user_map.contains_key(*uuid))
-					.copied()
-					.collect();
-
-				// Apply changes
-				for uuid in &removed {
-					user_map.remove(uuid);
-				}
-				for uuid in &added {
-					if let Some(user_id) = new_user_map.get(uuid) {
-						user_map.insert(*uuid, *user_id);
-					}
-				}
-
-				let count = user_map.len();
-
-				// Release the lock before kicking users to avoid potential deadlocks
-				drop(user_map);
-
-				// Kick removed users' connections if ctx is provided
-				if !removed.is_empty() {
-					if let Some(ctx) = ctx {
-						ctx.kick_users(&removed).await;
-					}
-				}
-
-				if !removed.is_empty() || !added.is_empty() {
-					info!(
-						"Users updated: {} added, {} removed, {} total",
-						added.len(),
-						removed.len(),
-						count
-					);
-				} else {
-					info!("Fetched {} users from API (no changes)", count);
-				}
-				Ok(count)
-			}
-			Err(ApiError::NotModified { .. }) => {
-				info!("Users not modified (ETag match)");
-				Ok(self.users.read().await.len())
-			}
-			Err(e) => {
-				error!("Failed to fetch users: {}", e);
-				Err(eyre::eyre!("Failed to fetch users: {}", e))
-			}
-		}
-	}
-
-	/// Send heartbeat to API server
-	async fn send_heartbeat(&self) -> eyre::Result<()> {
-		let register_id = self.register_id.read().await.clone();
-		let register_id = register_id.ok_or_else(|| eyre::eyre!("No register_id available"))?;
-
-		match self.client.heartbeat(NodeType::Tuic, &register_id).await {
-			Ok(()) => {
-				info!("Heartbeat sent successfully");
-				Ok(())
-			}
-			Err(e) => {
-				error!("Failed to send heartbeat: {}", e);
-				Err(eyre::eyre!("Failed to send heartbeat: {}", e))
-			}
-		}
-	}
-
-	/// Submit traffic statistics to API server
-	/// Only resets counters on successful submission to avoid data loss
-	async fn submit_traffic(&self, ctx: &AppContext) -> eyre::Result<()> {
-		let register_id = self.register_id.read().await.clone();
-		let register_id = register_id.ok_or_else(|| eyre::eyre!("No register_id available"))?;
-
-		// Get traffic stats without resetting
-		let traffic_data = crate::stats::get_all_traffic(ctx).await;
-
-		// Filter out entries with no traffic or no requests
-		let traffic_list: Vec<UserTraffic> = traffic_data
-			.into_iter()
-			.filter(|(_, tx, rx, conn)| (*tx > 0 || *rx > 0) && *conn > 0)
-			.map(|(uid, tx, rx, conn)| UserTraffic::with_count(uid, tx as u64, rx as u64, conn as u64))
-			.collect();
-
-		if traffic_list.is_empty() {
-			info!("No traffic to submit");
-			return Ok(());
-		}
-
-		let count = traffic_list.len();
-		match self.client.submit(NodeType::Tuic, &register_id, traffic_list).await {
-			Ok(()) => {
-				// Only reset counters after successful submission
-				crate::stats::reset_all_traffic(ctx).await;
-				info!("Traffic submitted successfully ({} users)", count);
-				Ok(())
-			}
-			Err(e) => {
-				// Keep the data for next submission attempt
-				error!("Failed to submit traffic: {}, data retained for next attempt", e);
-				Err(eyre::eyre!("Failed to submit traffic: {}", e))
-			}
-		}
-	}
-}
-
-#[async_trait::async_trait]
-impl PanelService for Panel {
-	async fn init(&self, cfg: &mut crate::Config) -> eyre::Result<()> {
+	/// Initialize the panel: fetch config, register, fetch users
+	pub async fn init(&self, cfg: &mut crate::Config) -> eyre::Result<()> {
 		info!("Panel service initializing...");
 
 		// Ensure data directory exists
@@ -325,272 +162,167 @@ impl PanelService for Panel {
 			})?;
 		}
 
-		// Try to load existing state and verify register_id
-		let mut need_register = true;
-		let mut need_fetch_config = true;
-		let mut server_port: u16 = 0;
-		let mut zero_rtt_handshake = false;
-		let mut node_id: i64 = 0;
+		// Fetch config from panel
+		let node_config = self
+			.api
+			.fetch_config()
+			.await
+			.map_err(|e| eyre::eyre!("Failed to fetch config from server: {}", e))?;
+
+		let tuic_config: TuicConfig = match node_config {
+			NodeConfigEnum::Tuic(json) => {
+				serde_json::from_str(&json).map_err(|e| eyre::eyre!("Failed to parse TuicConfig: {}", e))?
+			}
+			other => {
+				return Err(eyre::eyre!("Expected Tuic config, got: {:?}", other));
+			}
+		};
+
+		info!("Successfully fetched node config: {:?}", tuic_config);
+
+		let server_port = tuic_config.server_port;
+		let zero_rtt_handshake = tuic_config.zero_rtt_handshake;
 		let mut congestion_control = CongestionController::default();
-
-		if let Some(state) = self.load_state() {
-			if let Some(saved_register_id) = &state.register_id {
-				info!("Found saved register_id, verifying...");
-				match self.client.verify(NodeType::Tuic, saved_register_id).await {
-					Ok(true) => {
-						info!("Saved register_id is valid, skipping registration");
-						*self.register_id.write().await = Some(saved_register_id.clone());
-						need_register = false;
-
-						// Use cached config if available
-						if let (Some(port), Some(zero_rtt), Some(id)) =
-							(state.server_port, state.zero_rtt_handshake, state.node_id)
-						{
-							if let Some(cc_str) = &state.congestion_control {
-								if let Ok(cc) = cc_str.parse::<CongestionController>() {
-									congestion_control = cc;
-								}
-							}
-							info!(
-								"Using cached config - server_port: {}, zero_rtt_handshake: {}, id: {}, congestion_control: \
-								 {:?}",
-								port, zero_rtt, id, congestion_control
-							);
-							server_port = port;
-							zero_rtt_handshake = zero_rtt;
-							node_id = id;
-							need_fetch_config = false;
-						}
-					}
-					Ok(false) => {
-						warn!("Saved register_id is invalid, will re-register");
-						self.delete_state();
-					}
-					Err(e) => {
-						// Network error - don't delete state, exit and retry on next startup
-						return Err(eyre::eyre!("Failed to verify register_id: {}", e));
-					}
-				}
+		if let Some(cc_str) = &tuic_config.server_congestion_control {
+			match cc_str.parse::<CongestionController>() {
+				Ok(cc) => congestion_control = cc,
+				Err(_) => warn!(
+					"Unknown congestion control '{}' from API, using default: {:?}",
+					cc_str, congestion_control
+				),
 			}
 		}
 
-		// Fetch config from API if needed
-		if need_fetch_config {
-			let node_config = self
-				.client
-				.config(NodeType::Tuic, self.config.node_id as i64)
-				.await
-				.map_err(|e| {
-					error!("Failed to fetch config from API: {}", e);
-					eyre::eyre!("Failed to fetch config from API, cannot continue: {}", e)
-				})?;
+		info!(
+			"Tuic config - server_port: {}, zero_rtt_handshake: {}, congestion_control: {:?}, id: {}",
+			server_port, zero_rtt_handshake, congestion_control, tuic_config.id
+		);
 
-			info!("Successfully fetched node config: {:?}", node_config);
-
-			// Convert to TuicConfig
-			let tuic_config = match node_config {
-				NodeConfigEnum::Tuic(config) => config,
-				_ => {
-					error!("Expected Tuic config but got different type");
-					return Err(eyre::eyre!("Expected Tuic config but got different type, cannot continue"));
-				}
-			};
-
-			server_port = tuic_config.server_port;
-			zero_rtt_handshake = tuic_config.zero_rtt_handshake;
-			node_id = tuic_config.id;
-			if let Some(cc_str) = &tuic_config.server_congestion_control {
-				match cc_str.parse::<CongestionController>() {
-					Ok(cc) => congestion_control = cc,
-					Err(_) => warn!(
-						"Unknown congestion control '{}' from API, using default: {:?}",
-						cc_str, congestion_control
-					),
-				}
-			}
-			info!(
-				"Tuic config - server_port: {}, zero_rtt_handshake: {}, id: {}, congestion_control: {:?}",
-				server_port, zero_rtt_handshake, node_id, congestion_control
-			);
-		}
-
-		// Update config with values from panel API or cache
+		// Update config with values from panel API
 		cfg.server_port = server_port;
 		cfg.zero_rtt_handshake = zero_rtt_handshake;
 		cfg.congestion_control = congestion_control;
 
-		if need_register {
-			// Get hostname and register node
-			let hostname = get_hostname();
-			let register_request = RegisterRequest::new(hostname.clone(), server_port);
+		// Initialize (register node)
+		self.api
+			.initialize(server_port)
+			.await
+			.map_err(|e| eyre::eyre!("Failed to register node: {}", e))?;
 
-			info!("Registering node with hostname: {}, port: {}", hostname, server_port);
+		info!("Node registered successfully");
 
-			let register_id = self
-				.client
-				.register(NodeType::Tuic, self.config.node_id as i64, register_request)
-				.await
-				.map_err(|e| {
-					error!("Failed to register node: {}", e);
-					eyre::eyre!("Failed to register node, cannot continue: {}", e)
-				})?;
-
-			info!("Node registered successfully, register_id: {}", register_id);
-
-			// Save register_id for later use
-			*self.register_id.write().await = Some(register_id.clone());
-
-			// Persist state to file with all config info
-			let state = PanelState {
-				register_id:        Some(register_id),
-				node_id:            Some(node_id),
-				server_port:        Some(server_port),
-				zero_rtt_handshake: Some(zero_rtt_handshake),
-				congestion_control: Some(format!("{:?}", congestion_control).to_lowercase()),
-			};
-			self.save_state(&state)?;
-		} else if need_fetch_config {
-			// Update state file with new config info (register_id unchanged)
-			let register_id = self.register_id.read().await.clone();
-			let state = PanelState {
-				register_id,
-				node_id: Some(node_id),
-				server_port: Some(server_port),
-				zero_rtt_handshake: Some(zero_rtt_handshake),
-				congestion_control: Some(format!("{:?}", congestion_control).to_lowercase()),
-			};
-			self.save_state(&state)?;
+		// Fetch initial users (this also updates the UUID map via TuicPanelApi wrapper)
+		if let Some(users) = self
+			.api
+			.fetch_users()
+			.await
+			.map_err(|e| eyre::eyre!("Failed to fetch users: {}", e))?
+		{
+			self.user_manager.init(&users);
+			info!("Fetched {} initial users", users.len());
 		}
 
-		// Fetch initial user data (no ctx needed since no connections exist yet)
-		self.fetch_users(None).await?;
-
 		// Send initial heartbeat
-		self.send_heartbeat().await?;
+		self.api
+			.heartbeat()
+			.await
+			.map_err(|e| eyre::eyre!("Failed to send heartbeat: {}", e))?;
 
 		info!("Panel service initialized, server_port: {}", server_port);
 		Ok(())
 	}
 
-	async fn run(&self, ctx: Arc<AppContext>) -> eyre::Result<()> {
-		{
-			*self.running.write().await = true;
-		}
-
-		info!("Panel service running...");
-
-		let fetch_interval = Duration::from_secs(self.config.fetch_users_interval);
-		let heartbeat_interval = Duration::from_secs(self.config.heartbeat_interval);
-		let report_interval = Duration::from_secs(self.config.report_traffics_interval);
-		let task_timeout = Duration::from_secs(self.config.timeout);
-
-		info!(
-			"Starting periodic tasks (user fetch: {}s, heartbeat: {}s, report traffic: {}s, task timeout: {}s)",
-			self.config.fetch_users_interval,
-			self.config.heartbeat_interval,
-			self.config.report_traffics_interval,
-			self.config.timeout
+	/// Start background tasks (fetch users, heartbeat, submit traffic).
+	/// BackgroundTasks creates its own dedicated runtime internally.
+	pub fn start_background_tasks(&self, ctx: Arc<AppContext>) -> BackgroundTasksHandle {
+		let task_config = TaskConfig::new(
+			Duration::from_secs(self.config.fetch_users_interval),
+			Duration::from_secs(self.config.report_traffics_interval),
+			Duration::from_secs(self.config.heartbeat_interval),
 		);
 
-		let mut fetch_timer = tokio::time::interval(fetch_interval);
-		let mut heartbeat_timer = tokio::time::interval(heartbeat_interval);
-		let mut report_timer = tokio::time::interval(report_interval);
+		let pending_kicks = self.api.pending_kicks.clone();
 
-		// Skip the first immediate tick
-		fetch_timer.tick().await;
-		heartbeat_timer.tick().await;
-		report_timer.tick().await;
+		BackgroundTasks::new(
+			task_config,
+			self.api.clone(),
+			self.user_manager.clone(),
+			self.stats_collector.clone(),
+		)
+		.on_user_diff(Arc::new(move |_diff| {
+			// Consume pending_kicks computed during fetch_users()
+			let ctx = ctx.clone();
+			let pending_kicks = pending_kicks.clone();
 
-		// Subscribe to shutdown signal from AppContext
-		let mut shutdown_rx = ctx.shutdown_tx.subscribe();
-
-		// Periodic tasks loop
-		loop {
-			tokio::select! {
-				result = shutdown_rx.recv() => {
-					match result {
-						Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-							info!("Received shutdown signal, stopping periodic tasks");
-							break;
-						}
-						Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-							warn!("Shutdown receiver lagged by {} messages, continuing", n);
-							// Continue the loop, don't break
-						}
-					}
+			tokio::spawn(async move {
+				let uuids_to_kick: Vec<Uuid> = std::mem::take(&mut *pending_kicks.write().await);
+				if !uuids_to_kick.is_empty() {
+					info!("Kicking {} user(s) with stale UUIDs", uuids_to_kick.len());
+					ctx.kick_users(&uuids_to_kick).await;
 				}
-				_ = fetch_timer.tick() => {
-					// Fetch users periodically with timeout protection
-					// Pass ctx to kick removed users' connections
-					match tokio::time::timeout(task_timeout, self.fetch_users(Some(&ctx))).await {
-						Ok(Ok(_)) => {}
-						Ok(Err(e)) => {
-							error!("Periodic user fetch failed: {}", e);
-						}
-						Err(_) => {
-							error!("Periodic user fetch timed out after {}s", task_timeout.as_secs());
-						}
-					}
-				}
-				_ = heartbeat_timer.tick() => {
-					// Send heartbeat periodically with timeout protection
-					match tokio::time::timeout(task_timeout, self.send_heartbeat()).await {
-						Ok(Ok(_)) => {}
-						Ok(Err(e)) => {
-							error!("Heartbeat failed: {}", e);
-						}
-						Err(_) => {
-							error!("Heartbeat timed out after {}s", task_timeout.as_secs());
-						}
-					}
-				}
-				_ = report_timer.tick() => {
-					// Submit traffic stats periodically with timeout protection
-					match tokio::time::timeout(task_timeout, self.submit_traffic(&ctx)).await {
-						Ok(Ok(_)) => {}
-						Ok(Err(e)) => {
-							error!("Traffic submission failed: {}", e);
-						}
-						Err(_) => {
-							error!("Traffic submission timed out after {}s", task_timeout.as_secs());
-						}
-					}
-				}
-			}
-		}
-
-		info!("Panel service stopped");
-		Ok(())
+			});
+		}))
+		.start()
 	}
 
-	async fn close(&self) -> eyre::Result<()> {
+	/// Close the panel service (unregister node)
+	pub async fn close(&self) -> eyre::Result<()> {
 		info!("Panel service closing...");
 
-		{
-			*self.running.write().await = false;
-		}
-
-		// Unregister node if we have a register_id
-		let register_id = self.register_id.read().await.clone();
-		if let Some(rid) = register_id {
-			info!("Unregistering node with register_id: {}", rid);
-			match self.client.unregister(NodeType::Tuic, &rid).await {
-				Ok(()) => {
-					info!("Node unregistered successfully");
-					// Clear state file after successful unregister
-					self.delete_state();
-					// Clear register_id in memory
-					*self.register_id.write().await = None;
-				}
-				Err(e) => {
-					warn!("Failed to unregister node: {}", e);
-				}
+		match self.api.unregister().await {
+			Ok(()) => {
+				info!("Node unregistered successfully");
+			}
+			Err(e) => {
+				warn!("Failed to unregister node: {}", e);
 			}
 		}
 
 		info!("Panel service closed");
 		Ok(())
 	}
+}
+
+/// Compute which UUIDs should be kicked based on the old UUID map and new user
+/// list.
+///
+/// A UUID is kicked when:
+/// - The user_id no longer exists in the new user list (user removed)
+/// - The user_id exists but its UUID has changed (UUID rotation)
+fn compute_kicks(old_map: &UserMap, new_users: &[User]) -> Vec<Uuid> {
+	let new_uuid_by_id: HashMap<i64, &str> = new_users.iter().map(|u| (u.id, u.uuid.as_str())).collect();
+
+	let mut kicks = Vec::new();
+	for (uuid, uid) in old_map.iter() {
+		match new_uuid_by_id.get(uid) {
+			None => {
+				// User removed
+				kicks.push(*uuid);
+			}
+			Some(new_uuid_str) => {
+				// User exists but UUID may have changed
+				if let Ok(new_uuid) = Uuid::parse_str(new_uuid_str) {
+					if &new_uuid != uuid {
+						kicks.push(*uuid);
+					}
+				}
+			}
+		}
+	}
+	kicks
+}
+
+/// Rebuild the UUID -> user_id map from a list of users
+async fn rebuild_uuid_map(users_lock: &RwLock<UserMap>, users: &[User]) {
+	let mut new_map = HashMap::with_capacity(users.len());
+	for user in users {
+		if let Ok(uuid) = Uuid::parse_str(&user.uuid) {
+			new_map.insert(uuid, user.id);
+		} else {
+			warn!("Invalid UUID format for user {}: {}", user.id, user.uuid);
+		}
+	}
+	*users_lock.write().await = new_map;
 }
 
 /// Optional panel service wrapper for when panel is not configured
@@ -640,11 +372,14 @@ impl OptionalPanel {
 			Vec::new()
 		}
 	}
-}
 
-#[async_trait::async_trait]
-impl PanelService for OptionalPanel {
-	async fn init(&self, cfg: &mut crate::Config) -> eyre::Result<()> {
+	/// Get the StatsCollector if panel is enabled
+	pub fn stats_collector(&self) -> Option<&Arc<StatsCollector>> {
+		self.inner.as_ref().map(|p| p.stats_collector())
+	}
+
+	/// Initialize the panel service
+	pub async fn init(&self, cfg: &mut crate::Config) -> eyre::Result<()> {
 		if let Some(panel) = &self.inner {
 			panel.init(cfg).await
 		} else {
@@ -653,21 +388,217 @@ impl PanelService for OptionalPanel {
 		}
 	}
 
-	async fn run(&self, ctx: Arc<AppContext>) -> eyre::Result<()> {
-		if let Some(panel) = &self.inner {
-			panel.run(ctx).await
-		} else {
-			// Panel is disabled, just return immediately
-			Ok(())
-		}
+	/// Start background tasks
+	pub fn start_background_tasks(&self, ctx: Arc<AppContext>) -> Option<BackgroundTasksHandle> {
+		self.inner.as_ref().map(|panel| panel.start_background_tasks(ctx))
 	}
 
-	async fn close(&self) -> eyre::Result<()> {
+	/// Close the panel service
+	pub async fn close(&self) -> eyre::Result<()> {
 		if let Some(panel) = &self.inner {
 			panel.close().await
 		} else {
 			warn!("Panel service is disabled, skipping close");
 			Ok(())
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn make_user(id: i64, uuid: &str) -> User {
+		User {
+			id,
+			uuid: uuid.to_string(),
+		}
+	}
+
+	fn make_uuid_map(entries: &[(Uuid, i64)]) -> UserMap {
+		entries.iter().cloned().collect()
+	}
+
+	// ── compute_kicks tests ──────────────────────────────────────────────
+
+	#[test]
+	fn test_compute_kicks_no_change() {
+		let uuid1 = Uuid::new_v4();
+		let uuid2 = Uuid::new_v4();
+		let old_map = make_uuid_map(&[(uuid1, 1), (uuid2, 2)]);
+		let new_users = vec![make_user(1, &uuid1.to_string()), make_user(2, &uuid2.to_string())];
+
+		let kicks = compute_kicks(&old_map, &new_users);
+		assert!(kicks.is_empty(), "No users changed, no kicks expected");
+	}
+
+	#[test]
+	fn test_compute_kicks_user_removed() {
+		let uuid1 = Uuid::new_v4();
+		let uuid2 = Uuid::new_v4();
+		let old_map = make_uuid_map(&[(uuid1, 1), (uuid2, 2)]);
+		let new_users = vec![make_user(1, &uuid1.to_string())];
+
+		let kicks = compute_kicks(&old_map, &new_users);
+		assert_eq!(kicks.len(), 1);
+		assert_eq!(kicks[0], uuid2);
+	}
+
+	#[test]
+	fn test_compute_kicks_all_users_removed() {
+		let uuid1 = Uuid::new_v4();
+		let uuid2 = Uuid::new_v4();
+		let old_map = make_uuid_map(&[(uuid1, 1), (uuid2, 2)]);
+		let new_users = vec![];
+
+		let kicks = compute_kicks(&old_map, &new_users);
+		assert_eq!(kicks.len(), 2);
+		assert!(kicks.contains(&uuid1));
+		assert!(kicks.contains(&uuid2));
+	}
+
+	#[test]
+	fn test_compute_kicks_uuid_changed() {
+		let old_uuid = Uuid::new_v4();
+		let new_uuid = Uuid::new_v4();
+		let old_map = make_uuid_map(&[(old_uuid, 1)]);
+		let new_users = vec![make_user(1, &new_uuid.to_string())];
+
+		let kicks = compute_kicks(&old_map, &new_users);
+		assert_eq!(kicks.len(), 1);
+		assert_eq!(kicks[0], old_uuid, "Old UUID should be kicked");
+	}
+
+	#[test]
+	fn test_compute_kicks_new_user_added() {
+		let uuid1 = Uuid::new_v4();
+		let uuid_new = Uuid::new_v4();
+		let old_map = make_uuid_map(&[(uuid1, 1)]);
+		let new_users = vec![make_user(1, &uuid1.to_string()), make_user(2, &uuid_new.to_string())];
+
+		let kicks = compute_kicks(&old_map, &new_users);
+		assert!(kicks.is_empty(), "New user should not cause any kicks");
+	}
+
+	#[test]
+	fn test_compute_kicks_empty_old_map() {
+		let old_map = make_uuid_map(&[]);
+		let new_users = vec![make_user(1, &Uuid::new_v4().to_string())];
+
+		let kicks = compute_kicks(&old_map, &new_users);
+		assert!(kicks.is_empty(), "Empty old map should produce no kicks");
+	}
+
+	#[test]
+	fn test_compute_kicks_mixed_changes() {
+		let uuid1 = Uuid::new_v4();
+		let uuid2 = Uuid::new_v4();
+		let uuid3 = Uuid::new_v4();
+		let new_uuid2 = Uuid::new_v4();
+		let old_map = make_uuid_map(&[(uuid1, 1), (uuid2, 2), (uuid3, 3)]);
+		let new_users = vec![
+			make_user(1, &uuid1.to_string()),     // unchanged
+			make_user(2, &new_uuid2.to_string()), // UUID changed
+			// user 3 removed
+			make_user(4, &Uuid::new_v4().to_string()), // new user
+		];
+
+		let kicks = compute_kicks(&old_map, &new_users);
+		assert_eq!(kicks.len(), 2);
+		assert!(kicks.contains(&uuid2), "Changed UUID should be kicked");
+		assert!(kicks.contains(&uuid3), "Removed user should be kicked");
+		assert!(!kicks.contains(&uuid1), "Unchanged user should not be kicked");
+	}
+
+	#[test]
+	fn test_compute_kicks_invalid_new_uuid_no_kick() {
+		let uuid1 = Uuid::new_v4();
+		let old_map = make_uuid_map(&[(uuid1, 1)]);
+		let new_users = vec![make_user(1, "not-a-valid-uuid")];
+
+		let kicks = compute_kicks(&old_map, &new_users);
+		assert!(kicks.is_empty(), "Invalid new UUID should not trigger a kick");
+	}
+
+	// ── rebuild_uuid_map tests ───────────────────────────────────────────
+
+	#[tokio::test]
+	async fn test_rebuild_uuid_map_basic() {
+		let users_lock = RwLock::new(HashMap::new());
+		let uuid1 = Uuid::new_v4();
+		let uuid2 = Uuid::new_v4();
+
+		let users = vec![make_user(1, &uuid1.to_string()), make_user(2, &uuid2.to_string())];
+
+		rebuild_uuid_map(&users_lock, &users).await;
+
+		let map = users_lock.read().await;
+		assert_eq!(map.len(), 2);
+		assert_eq!(map.get(&uuid1), Some(&1));
+		assert_eq!(map.get(&uuid2), Some(&2));
+	}
+
+	#[tokio::test]
+	async fn test_rebuild_uuid_map_replaces_old_entries() {
+		let old_uuid = Uuid::new_v4();
+		let new_uuid = Uuid::new_v4();
+		let users_lock = RwLock::new(HashMap::from([(old_uuid, 99)]));
+
+		let users = vec![make_user(1, &new_uuid.to_string())];
+
+		rebuild_uuid_map(&users_lock, &users).await;
+
+		let map = users_lock.read().await;
+		assert_eq!(map.len(), 1);
+		assert!(map.get(&old_uuid).is_none(), "Old UUID should be gone");
+		assert_eq!(map.get(&new_uuid), Some(&1));
+	}
+
+	#[tokio::test]
+	async fn test_rebuild_uuid_map_skips_invalid_uuids() {
+		let users_lock = RwLock::new(HashMap::new());
+		let valid_uuid = Uuid::new_v4();
+
+		let users = vec![make_user(1, &valid_uuid.to_string()), make_user(2, "invalid-uuid")];
+
+		rebuild_uuid_map(&users_lock, &users).await;
+
+		let map = users_lock.read().await;
+		assert_eq!(map.len(), 1);
+		assert_eq!(map.get(&valid_uuid), Some(&1));
+	}
+
+	#[tokio::test]
+	async fn test_rebuild_uuid_map_empty_list_clears_map() {
+		let uuid = Uuid::new_v4();
+		let users_lock = RwLock::new(HashMap::from([(uuid, 1)]));
+
+		rebuild_uuid_map(&users_lock, &[]).await;
+
+		let map = users_lock.read().await;
+		assert!(map.is_empty());
+	}
+
+	// ── OptionalPanel tests ──────────────────────────────────────────────
+
+	#[test]
+	fn test_optional_panel_disabled() {
+		let panel = OptionalPanel::disabled();
+		assert!(!panel.is_enabled());
+		assert!(panel.panel().is_none());
+		assert!(panel.stats_collector().is_none());
+	}
+
+	#[tokio::test]
+	async fn test_optional_panel_disabled_validate_user() {
+		let panel = OptionalPanel::disabled();
+		let uuid = Uuid::new_v4();
+		assert_eq!(panel.validate_user(&uuid).await, None);
+	}
+
+	#[tokio::test]
+	async fn test_optional_panel_disabled_get_all_user_ids() {
+		let panel = OptionalPanel::disabled();
+		assert!(panel.get_all_user_ids().await.is_empty());
 	}
 }
