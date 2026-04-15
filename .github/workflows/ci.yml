@@ -36,8 +36,6 @@ jobs:
           components: clippy
       - name: Configure git for private repos
         run: git config --global url."https://${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -51,8 +49,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Configure git for private repos
         run: git config --global url."https://${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
 
@@ -66,7 +62,5 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Configure git for private repos
         run: git config --global url."https://${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p server-tuic-rs
