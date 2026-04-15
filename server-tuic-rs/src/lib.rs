@@ -162,19 +162,17 @@ async fn run_inner(panel_service: Arc<OptionalPanel>, cfg: Config) -> eyre::Resu
 }
 
 /// Remove a connection from the online clients registry.
-/// This is the logic extracted from Connection::unregister_client for testability.
+/// This is the logic extracted from Connection::unregister_client for
+/// testability.
 ///
-/// Note: We intentionally do NOT remove the cache entry when the inner map becomes
-/// empty. Doing so would create a TOCTOU race: between dropping the inner lock and
-/// calling cache.remove(), a concurrent register_client could insert a new connection
-/// into the same entry — and remove() would silently discard it.
-/// Empty entries are lightweight (Arc to empty HashMap) and will be reused on reconnect.
-/// The kick_users path handles cleanup when users are actually removed.
-pub(crate) async fn unregister_from_online_clients(
-	online_clients: &OnlineClients,
-	uuid: &Uuid,
-	conn_id: usize,
-) {
+/// Note: We intentionally do NOT remove the cache entry when the inner map
+/// becomes empty. Doing so would create a TOCTOU race: between dropping the
+/// inner lock and calling cache.remove(), a concurrent register_client could
+/// insert a new connection into the same entry — and remove() would silently
+/// discard it. Empty entries are lightweight (Arc to empty HashMap) and will be
+/// reused on reconnect. The kick_users path handles cleanup when users are
+/// actually removed.
+pub(crate) async fn unregister_from_online_clients(online_clients: &OnlineClients, uuid: &Uuid, conn_id: usize) {
 	if let Some(user_conns) = online_clients.get(uuid).await {
 		user_conns.write().await.remove(&conn_id);
 	}
@@ -186,14 +184,15 @@ mod tests {
 
 	/// RED test: Proves the TOCTOU race in unregister_from_online_clients.
 	///
-	/// Scenario: conn_1 unregisters (sees empty inner map, drops lock, about to remove cache entry).
-	/// Meanwhile conn_2 registers for the same user (goes into the same inner map).
-	/// Then unregister removes the cache entry — conn_2's registration is silently lost.
+	/// Scenario: conn_1 unregisters (sees empty inner map, drops lock, about to
+	/// remove cache entry). Meanwhile conn_2 registers for the same user (goes
+	/// into the same inner map). Then unregister removes the cache entry —
+	/// conn_2's registration is silently lost.
 	///
-	/// We can't construct real QuinnConnection in tests, so we test with the cache
-	/// at the entry-lifecycle level: if get_with returns the existing entry during the
-	/// race window, and then remove() deletes that entry, any data added during the
-	/// window is lost.
+	/// We can't construct real QuinnConnection in tests, so we test with the
+	/// cache at the entry-lifecycle level: if get_with returns the existing
+	/// entry during the race window, and then remove() deletes that entry, any
+	/// data added during the window is lost.
 	#[tokio::test]
 	async fn test_unregister_toctou_race() {
 		let online_clients: OnlineClients = Cache::builder().build();
@@ -217,9 +216,10 @@ mod tests {
 			.get_with(uuid, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
 			.await;
 
-		// In the real race, entry_after would be the SAME Arc as _entry (get_with returns existing).
-		// But because remove() already ran, get_with creates a BRAND NEW Arc.
-		// The original Arc (which conn_2 would have written to) is orphaned.
+		// In the real race, entry_after would be the SAME Arc as _entry (get_with
+		// returns existing). But because remove() already ran, get_with creates a
+		// BRAND NEW Arc. The original Arc (which conn_2 would have written to) is
+		// orphaned.
 		//
 		// This proves the race: even though no connections exist, the remove() creates
 		// a window where a concurrent register can be lost.
@@ -230,8 +230,8 @@ mod tests {
 		// no race occurred, but they're different because remove() intervened.
 		assert!(
 			Arc::ptr_eq(&_entry, &entry_after),
-			"TOCTOU race: remove() destroyed the cache entry, causing get_with to create a new \
-			 one. Any connection registered into the original entry is now orphaned."
+			"TOCTOU race: remove() destroyed the cache entry, causing get_with to create a new one. Any connection registered \
+			 into the original entry is now orphaned."
 		);
 	}
 }
