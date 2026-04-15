@@ -108,9 +108,9 @@ impl Connection {
 			// Record traffic stats
 			if self.auth.is_authenticated() {
 				let uid = self.auth.get_uid();
-				stats::req_incr(&self.ctx, uid).await;
-				stats::traffic_tx(&self.ctx, uid, tx).await;
-				stats::traffic_rx(&self.ctx, uid, rx).await;
+				stats::req_incr(&self.ctx, uid);
+				stats::traffic_tx(&self.ctx, uid, tx);
+				stats::traffic_rx(&self.ctx, uid, rx);
 			}
 
 			if let Some(err) = err {
@@ -135,13 +135,13 @@ impl Connection {
 	fn get_outbound_handler(&self, addr: &Address, protocol: Protocol) -> std::sync::Arc<OutboundHandler> {
 		if let Some(acl_engine) = &self.ctx.cfg.acl_engine {
 			// Extract host and port from address
+			// Declare ip_string outside the match so it outlives the borrow in (host, port)
+			let ip_string;
 			let (host, port) = match addr {
 				Address::DomainAddress(domain, port) => (domain.as_str(), *port),
 				Address::SocketAddress(addr) => {
-					// Convert IP to string for matching
-					let ip_str = addr.ip().to_string();
-					// Leak string to get &'static str (acceptable for IP addresses)
-					(Box::leak(ip_str.into_boxed_str()) as &str, addr.port())
+					ip_string = addr.ip().to_string();
+					(ip_string.as_str(), addr.port())
 				}
 				Address::None => ("", 0),
 			};
@@ -297,8 +297,8 @@ impl Connection {
 			// Record traffic and request stats for UDP outbound
 			if self.auth.is_authenticated() {
 				let uid = self.auth.get_uid();
-				stats::req_incr(&self.ctx, uid).await;
-				stats::traffic_tx(&self.ctx, uid, pkt.len()).await;
+				stats::req_incr(&self.ctx, uid);
+				stats::traffic_tx(&self.ctx, uid, pkt.len());
 			}
 
 			if let Some(session) = session.upgrade() {
@@ -357,7 +357,7 @@ impl Connection {
 
 		// Record traffic stats for UDP inbound
 		if self.auth.is_authenticated() {
-			stats::traffic_rx(&self.ctx, self.auth.get_uid(), pkt.len()).await;
+			stats::traffic_rx(&self.ctx, self.auth.get_uid(), pkt.len());
 		}
 
 		let res = match self.udp_relay_mode.load().unwrap() {
@@ -387,5 +387,3 @@ fn address_to_acl_addr(addr: &Address) -> Addr {
 		Address::None => Addr::new("", 0),
 	}
 }
-
-impl Connection {}

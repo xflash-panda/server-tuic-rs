@@ -159,19 +159,8 @@ impl Connection {
 	async fn unregister_client(&self) {
 		if let Some(uuid) = self.auth.get() {
 			let conn_id = self.id() as usize;
-
-			if let Some(user_conns) = self.ctx.online_clients.get(&uuid).await {
-				let mut conns = user_conns.write().await;
-				conns.remove(&conn_id);
-
-				// If no more connections for this user, remove the user entry
-				if conns.is_empty() {
-					drop(conns); // Release lock before removing from outer cache
-					self.ctx.online_clients.remove(&uuid).await;
-				}
-
-				debug!("[{id:#010x}] [{uuid}] unregistered from online clients", id = conn_id,);
-			}
+			crate::unregister_from_online_clients(&self.ctx.online_clients, &uuid, conn_id).await;
+			debug!("[{id:#010x}] [{uuid}] unregistered from online clients", id = conn_id,);
 		}
 	}
 
