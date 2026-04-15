@@ -1,4 +1,9 @@
-use std::{collections::HashMap, collections::HashSet, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+	collections::{HashMap, HashSet},
+	path::PathBuf,
+	sync::Arc,
+	time::Duration,
+};
 
 use panel_connect_rpc::{ConnectRpcApiManager, ConnectRpcPanelConfig};
 use panel_core::{
@@ -36,7 +41,8 @@ pub struct PanelConfig {
 	pub ca_cert_path:             Option<String>,
 }
 
-/// User map: UUID -> user_id (i64), maintained separately for TUIC's UUID-based auth
+/// User map: UUID -> user_id (i64), maintained separately for TUIC's UUID-based
+/// auth
 type UserMap = HashMap<Uuid, i64>;
 
 /// Wrapper around ConnectRpcApiManager that intercepts fetch_users()
@@ -46,9 +52,9 @@ type UserMap = HashMap<Uuid, i64>;
 /// (removed/uuid-changed) BEFORE rebuilding the UUID map, then store them
 /// in `pending_kicks` for the on_user_diff callback to consume.
 struct TuicPanelApi {
-	inner: ConnectRpcApiManager,
+	inner:         ConnectRpcApiManager,
 	/// Shared UUID map updated on every user fetch
-	users: Arc<RwLock<UserMap>>,
+	users:         Arc<RwLock<UserMap>>,
 	/// UUIDs that should be kicked after the next user diff.
 	/// Computed during fetch_users() while old UUID map is still available.
 	pending_kicks: Arc<RwLock<Vec<Uuid>>>,
@@ -124,8 +130,8 @@ impl Panel {
 		let pending_kicks: Arc<RwLock<Vec<Uuid>>> = Arc::new(RwLock::new(Vec::new()));
 
 		let api = Arc::new(TuicPanelApi {
-			inner: ConnectRpcApiManager::new(rpc_config),
-			users: users.clone(),
+			inner:         ConnectRpcApiManager::new(rpc_config),
+			users:         users.clone(),
 			pending_kicks: pending_kicks.clone(),
 		});
 		let user_manager = Arc::new(UserManager::new());
@@ -292,7 +298,8 @@ impl Panel {
 	}
 }
 
-/// Compute which UUIDs should be kicked based on the old UUID map and new user list.
+/// Compute which UUIDs should be kicked based on the old UUID map and new user
+/// list.
 ///
 /// A UUID is kicked when:
 /// - The user_id no longer exists in the new user list (user removed)
@@ -432,10 +439,7 @@ mod tests {
 		let uuid1 = Uuid::new_v4();
 		let uuid2 = Uuid::new_v4();
 		let old_map = make_uuid_map(&[(uuid1, 1), (uuid2, 2)]);
-		let new_users = vec![
-			make_user(1, &uuid1.to_string()),
-			make_user(2, &uuid2.to_string()),
-		];
+		let new_users = vec![make_user(1, &uuid1.to_string()), make_user(2, &uuid2.to_string())];
 
 		let kicks = compute_kicks(&old_map, &new_users);
 		assert!(kicks.is_empty(), "No users changed, no kicks expected");
@@ -486,10 +490,7 @@ mod tests {
 		let uuid_new = Uuid::new_v4();
 		let old_map = make_uuid_map(&[(uuid1, 1)]);
 		// Existing user stays, new user added
-		let new_users = vec![
-			make_user(1, &uuid1.to_string()),
-			make_user(2, &uuid_new.to_string()),
-		];
+		let new_users = vec![make_user(1, &uuid1.to_string()), make_user(2, &uuid_new.to_string())];
 
 		let kicks = compute_kicks(&old_map, &new_users);
 		assert!(kicks.is_empty(), "New user should not cause any kicks");
@@ -512,8 +513,8 @@ mod tests {
 		let new_uuid2 = Uuid::new_v4();
 		let old_map = make_uuid_map(&[(uuid1, 1), (uuid2, 2), (uuid3, 3)]);
 		let new_users = vec![
-			make_user(1, &uuid1.to_string()),        // unchanged
-			make_user(2, &new_uuid2.to_string()),     // UUID changed
+			make_user(1, &uuid1.to_string()),     // unchanged
+			make_user(2, &new_uuid2.to_string()), // UUID changed
 			// user 3 removed
 			make_user(4, &Uuid::new_v4().to_string()), // new user
 		];
@@ -544,10 +545,7 @@ mod tests {
 		let uuid1 = Uuid::new_v4();
 		let uuid2 = Uuid::new_v4();
 
-		let users = vec![
-			make_user(1, &uuid1.to_string()),
-			make_user(2, &uuid2.to_string()),
-		];
+		let users = vec![make_user(1, &uuid1.to_string()), make_user(2, &uuid2.to_string())];
 
 		rebuild_uuid_map(&users_lock, &users).await;
 
@@ -578,10 +576,7 @@ mod tests {
 		let users_lock = RwLock::new(HashMap::new());
 		let valid_uuid = Uuid::new_v4();
 
-		let users = vec![
-			make_user(1, &valid_uuid.to_string()),
-			make_user(2, "invalid-uuid"),
-		];
+		let users = vec![make_user(1, &valid_uuid.to_string()), make_user(2, "invalid-uuid")];
 
 		rebuild_uuid_map(&users_lock, &users).await;
 
