@@ -35,14 +35,11 @@ quinn-congestions = { workspace = true }
 tuic = { package = "tuic-core", path = "../core", default-features = false, features = ["async_marshal", "marshal", "model"] }
 register-count = { version = "0.1.0", default-features = false, features = ["std"] }
 
-# Panel Connect RPC Client
-server-agent-proto-rs = { git = "https://github.com/xflash-panda/server-agent-proto-rs.git", tag = "v0.2.1" }
+# Panel (server-panel-rs local)
+panel-core = { path = "../../server-panel-rs/panel-core" }
+panel-connect-rpc = { path = "../../server-panel-rs/panel-connect-rpc" }
 server-client-rs = { git = "https://github.com/xflash-panda/server-client-rs", tag = "v0.1.12" }
-connectrpc = { version = "0.3", features = ["client"] }
-buffa = { version = "0.3", features = ["json"] }
-connect-rust-h3 = { git = "https://github.com/xflash-panda/connect-rust-h3", tag = "v0.2.0" }
-hostname = "0.4"
-http-body = "1"
+anyhow = "1"
 
 # Tokio/Async
 tokio = { version = "1", default-features = false, features = ["io-util", "macros", "net", "parking_lot", "rt-multi-thread", "time", "fs", "signal"] }

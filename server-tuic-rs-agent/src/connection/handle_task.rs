@@ -108,9 +108,9 @@ impl Connection {
 			// Record traffic stats
 			if self.auth.is_authenticated() {
 				let uid = self.auth.get_uid();
-				stats::req_incr(&self.ctx, uid).await;
-				stats::traffic_tx(&self.ctx, uid, tx).await;
-				stats::traffic_rx(&self.ctx, uid, rx).await;
+				stats::req_incr(&self.ctx, uid);
+				stats::traffic_tx(&self.ctx, uid, tx);
+				stats::traffic_rx(&self.ctx, uid, rx);
 			}
 
 			if let Some(err) = err {
@@ -297,8 +297,8 @@ impl Connection {
 			// Record traffic and request stats for UDP outbound
 			if self.auth.is_authenticated() {
 				let uid = self.auth.get_uid();
-				stats::req_incr(&self.ctx, uid).await;
-				stats::traffic_tx(&self.ctx, uid, pkt.len()).await;
+				stats::req_incr(&self.ctx, uid);
+				stats::traffic_tx(&self.ctx, uid, pkt.len());
 			}
 
 			if let Some(session) = session.upgrade() {
@@ -357,7 +357,7 @@ impl Connection {
 
 		// Record traffic stats for UDP inbound
 		if self.auth.is_authenticated() {
-			stats::traffic_rx(&self.ctx, self.auth.get_uid(), pkt.len()).await;
+			stats::traffic_rx(&self.ctx, self.auth.get_uid(), pkt.len());
 		}
 
 		let res = match self.udp_relay_mode.load().unwrap() {

@@ -636,6 +636,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "6.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
+]
+
+[[package]]
 name = "data-encoding"
 version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1088,6 +1102,12 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
+version = "0.14.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
+
+[[package]]
+name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
@@ -1118,6 +1138,12 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hostname"
@@ -1748,6 +1774,39 @@ name = "openssl-probe"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
+
+[[package]]
+name = "panel-connect-rpc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "connect-rust-h3",
+ "connectrpc",
+ "hostname",
+ "panel-core",
+ "serde",
+ "serde_json",
+ "server-agent-proto-rs",
+ "server-client-rs 0.1.12 (git+https://github.com/xflash-panda/server-client-rs?tag=v0.1.12)",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "panel-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arc-swap",
+ "async-trait",
+ "dashmap",
+ "hex",
+ "scopeguard",
+ "sha2",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "parking"
@@ -2671,25 +2730,23 @@ name = "server-tuic-rs-agent"
 version = "0.4.1"
 dependencies = [
  "acl-engine-rs",
+ "anyhow",
  "arc-swap",
  "async-trait",
  "aws-lc-rs",
- "buffa",
  "bytes",
  "clap",
- "connect-rust-h3",
- "connectrpc",
  "derive_more",
  "educe",
  "eyre",
  "figment",
- "hostname",
- "http-body",
  "humantime",
  "humantime-serde",
  "ip_network",
  "ipnet",
  "moka",
+ "panel-connect-rpc",
+ "panel-core",
  "pest",
  "pest_derive",
  "quinn 0.12.0",
@@ -2703,7 +2760,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "server-agent-proto-rs",
  "server-client-rs 0.1.12 (git+https://github.com/xflash-panda/server-client-rs?tag=v0.1.12)",
  "socket2 0.6.3",
  "tempfile",

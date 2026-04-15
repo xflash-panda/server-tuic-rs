@@ -1,15 +1,11 @@
 // Library interface for server
 // This allows the server to be used as a library in integration tests
 
-use std::{
-	collections::HashMap,
-	sync::{Arc, atomic::AtomicUsize},
-	time::Duration,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use moka::future::Cache;
 use quinn::Connection as QuinnConnection;
-use tokio::sync::{RwLock, RwLock as AsyncRwLock, broadcast};
+use tokio::sync::{RwLock as AsyncRwLock, broadcast};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -26,10 +22,7 @@ pub mod tls;
 pub mod utils;
 
 pub use config::{Cli, Config, Control};
-pub use panel::{OptionalPanel, Panel, PanelService};
-
-/// Traffic statistics tuple: (tx_bytes, rx_bytes, connection_count)
-pub type TrafficStats = (AtomicUsize, AtomicUsize, AtomicUsize);
+pub use panel::{OptionalPanel, Panel};
 
 /// Per-user connection map: connection_id -> QuinnConnection
 pub type UserConnections = Arc<AsyncRwLock<HashMap<usize, QuinnConnection>>>;
@@ -43,8 +36,6 @@ const KICK_ERROR_CODE: quinn::VarInt = quinn::VarInt::from_u32(6002);
 
 pub struct AppContext {
 	pub cfg:            Config,
-	/// Traffic statistics per user, dynamically initialized on first access
-	pub traffic_stats:  RwLock<HashMap<i64, TrafficStats>>,
 	pub panel_service:  Arc<OptionalPanel>,
 	pub shutdown_tx:    broadcast::Sender<()>,
 	/// Online clients registry for connection management
@@ -81,42 +72,6 @@ impl AppContext {
 	}
 }
 
-/// Wrapper that ensures a tokio Runtime is always shut down via
-/// `spawn_blocking`, preventing the "Cannot drop a runtime in a context
-/// where blocking is not allowed" panic.
-struct BlockingShutdownRuntime(Option<tokio::runtime::Runtime>);
-
-impl BlockingShutdownRuntime {
-	fn new(rt: tokio::runtime::Runtime) -> Self {
-		Self(Some(rt))
-	}
-
-	fn handle(&self) -> &tokio::runtime::Handle {
-		self.0.as_ref().expect("runtime already taken").handle()
-	}
-
-	/// Shutdown the runtime gracefully. Must be called from async context.
-	async fn shutdown(mut self) {
-		if let Some(rt) = self.0.take() {
-			let _ = tokio::task::spawn_blocking(move || {
-				rt.shutdown_timeout(Duration::from_secs(10));
-			})
-			.await;
-		}
-	}
-}
-
-impl Drop for BlockingShutdownRuntime {
-	fn drop(&mut self) {
-		if let Some(rt) = self.0.take() {
-			// Fallback: if shutdown() was not called, use a background thread
-			std::thread::spawn(move || {
-				rt.shutdown_timeout(Duration::from_secs(10));
-			});
-		}
-	}
-}
-
 /// Run the TUIC server with the given configuration
 pub async fn run(mut cfg: Config) -> eyre::Result<()> {
 	// Initialize panel service if configured
@@ -138,22 +93,9 @@ pub async fn run(mut cfg: Config) -> eyre::Result<()> {
 	// This updates cfg with values from panel API (e.g., server_port)
 	panel_service.init(&mut cfg).await?;
 
-	// Build dedicated runtime for Panel service to isolate HTTP I/O
-	// from the TUIC server's thread pool.
-	// Wrapped in BlockingShutdownRuntime to prevent panic on async drop.
-	let panel_runtime = BlockingShutdownRuntime::new(
-		tokio::runtime::Builder::new_multi_thread()
-			.worker_threads(2)
-			.thread_name("panel-rt")
-			.enable_all()
-			.build()
-			.map_err(|e| eyre::eyre!("Failed to build panel runtime: {}", e))?,
-	);
-	let panel_runtime_handle = panel_runtime.handle().clone();
-
 	// Spawn run_inner in a separate task to catch panics
 	let panel_for_inner = panel_service.clone();
-	let handle = tokio::spawn(async move { run_inner(panel_for_inner, cfg, panel_runtime_handle).await });
+	let handle = tokio::spawn(async move { run_inner(panel_for_inner, cfg).await });
 
 	// Wait for the task to complete and handle both normal completion and panic
 	let result = match handle.await {
@@ -172,54 +114,32 @@ pub async fn run(mut cfg: Config) -> eyre::Result<()> {
 		}
 	};
 
-	// Close panel service on the panel runtime (HTTP unregister call)
+	// Close panel service (unregister node)
 	info!("Closing panel service...");
-	let panel_for_close = panel_service.clone();
-	match panel_runtime
-		.handle()
-		.spawn(async move { panel_for_close.close().await })
-		.await
-	{
-		Ok(Ok(())) => {}
-		Ok(Err(e)) => error!("Failed to close panel service: {}", e),
-		Err(e) => error!("Panel close task panicked: {}", e),
+	if let Err(e) = panel_service.close().await {
+		error!("Failed to close panel service: {}", e);
 	}
-
-	// Gracefully shutdown the panel runtime
-	panel_runtime.shutdown().await;
 
 	result
 }
 
 /// Inner run function that can return early on error
-async fn run_inner(
-	panel_service: Arc<OptionalPanel>,
-	cfg: Config,
-	panel_runtime_handle: tokio::runtime::Handle,
-) -> eyre::Result<()> {
+async fn run_inner(panel_service: Arc<OptionalPanel>, cfg: Config) -> eyre::Result<()> {
 	// Create shutdown signal channel
 	let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
-	// Traffic stats are initialized dynamically on first access
 	// Online clients cache with no TTL (connections are manually managed)
 	let online_clients: OnlineClients = Cache::builder().build();
 
 	let ctx = Arc::new(AppContext {
-		traffic_stats: RwLock::new(HashMap::new()),
 		cfg,
 		panel_service: panel_service.clone(),
 		shutdown_tx: shutdown_tx.clone(),
 		online_clients,
 	});
 
-	// Spawn panel service on the dedicated panel runtime
-	let panel_for_run = panel_service.clone();
-	let ctx_for_panel = ctx.clone();
-	let panel_handle = panel_runtime_handle.spawn(async move {
-		if let Err(e) = panel_for_run.run(ctx_for_panel).await {
-			error!("Panel service error: {}", e);
-		}
-	});
+	// Start background tasks (BackgroundTasks creates its own dedicated runtime)
+	let bg_handle = panel_service.start_background_tasks(ctx.clone());
 
 	// Initialize and start server
 	let server = server::Server::init(ctx.clone()).await?;
@@ -236,8 +156,10 @@ async fn run_inner(
 		}
 	}
 
-	// Wait for panel task to finish
-	let _ = panel_handle.await;
+	// Shutdown background tasks
+	if let Some(handle) = bg_handle {
+		handle.shutdown().await;
+	}
 
 	info!("Server shutdown complete");
 	Ok(())
