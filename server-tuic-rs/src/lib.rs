@@ -178,64 +178,6 @@ pub(crate) async fn unregister_from_online_clients(online_clients: &OnlineClient
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	/// RED test: Proves the TOCTOU race in unregister_from_online_clients.
-	///
-	/// Scenario: conn_1 unregisters (sees empty inner map, drops lock, about to
-	/// remove cache entry). Meanwhile conn_2 registers for the same user (goes
-	/// into the same inner map). Then unregister removes the cache entry —
-	/// conn_2's registration is silently lost.
-	///
-	/// We can't construct real QuinnConnection in tests, so we test with the
-	/// cache at the entry-lifecycle level: if get_with returns the existing
-	/// entry during the race window, and then remove() deletes that entry, any
-	/// data added during the window is lost.
-	#[tokio::test]
-	async fn test_unregister_toctou_race() {
-		let online_clients: OnlineClients = Cache::builder().build();
-		let uuid = Uuid::new_v4();
-
-		// Register: create cache entry with an empty inner map
-		// (simulates state after conn_1 was removed from inner map — map is now empty)
-		let _entry: UserConnections = online_clients
-			.get_with(uuid, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
-			.await;
-
-		// Simulate unregister_from_online_clients for conn_1 (id=1):
-		// It already removed conn_1 from inner map, saw empty, dropped lock.
-		// Now call the function which will see empty and remove the cache entry.
-		unregister_from_online_clients(&online_clients, &uuid, 1).await;
-
-		// RACE: conn_2 tries to register for the same user AFTER the remove.
-		// In the real race, conn_2's get_with happens BETWEEN drop(lock) and remove().
-		// Here we simulate it after — the entry is already gone from cache.
-		let entry_after: UserConnections = online_clients
-			.get_with(uuid, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
-			.await;
-
-		// In the real race, entry_after would be the SAME Arc as _entry (get_with
-		// returns existing). But because remove() already ran, get_with creates a
-		// BRAND NEW Arc. The original Arc (which conn_2 would have written to) is
-		// orphaned.
-		//
-		// This proves the race: even though no connections exist, the remove() creates
-		// a window where a concurrent register can be lost.
-
-		// To make this a concrete failure: verify that if we could have written
-		// to the original entry, that data would be gone from the cache.
-		// We prove this by checking ptr equality: they should be the same Arc if
-		// no race occurred, but they're different because remove() intervened.
-		assert!(
-			Arc::ptr_eq(&_entry, &entry_after),
-			"TOCTOU race: remove() destroyed the cache entry, causing get_with to create a new one. Any connection registered \
-			 into the original entry is now orphaned."
-		);
-	}
-}
-
 /// Wait for shutdown signal (SIGINT or SIGTERM)
 async fn wait_for_shutdown_signal() {
 	#[cfg(unix)]
@@ -259,5 +201,33 @@ async fn wait_for_shutdown_signal() {
 	{
 		tokio::signal::ctrl_c().await.expect("Failed to listen for Ctrl-C");
 		info!("Received Ctrl-C");
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// Verifies that unregister_from_online_clients preserves the cache entry,
+	/// so a concurrent register_client won't lose its connection reference.
+	#[tokio::test]
+	async fn test_unregister_toctou_race() {
+		let online_clients: OnlineClients = Cache::builder().build();
+		let uuid = Uuid::new_v4();
+
+		let entry: UserConnections = online_clients
+			.get_with(uuid, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
+			.await;
+
+		unregister_from_online_clients(&online_clients, &uuid, 1).await;
+
+		let entry_after: UserConnections = online_clients
+			.get_with(uuid, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
+			.await;
+
+		assert!(
+			Arc::ptr_eq(&entry, &entry_after),
+			"Cache entry should be preserved after unregister to avoid TOCTOU race"
+		);
 	}
 }
