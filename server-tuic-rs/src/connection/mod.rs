@@ -10,6 +10,7 @@ use register_count::Counter;
 use tokio::{sync::RwLock as AsyncRwLock, time};
 use tracing::debug;
 use tuic::quinn::{Authenticate, Connection as Model, side};
+
 use self::{authenticated::Authenticated, udp_session::UdpSession};
 use crate::{AppContext, UserConnections, error::Error, utils::UdpRelayMode};
 
@@ -135,7 +136,8 @@ impl Connection {
 		}
 	}
 
-	/// Register this connection in the online clients registry (keyed by user_id)
+	/// Register this connection in the online clients registry (keyed by
+	/// user_id)
 	async fn register_client(&self, user_id: i64) {
 		let conn_id = self.id() as usize;
 		let conn = self.inner.clone();
@@ -150,7 +152,11 @@ impl Connection {
 		// Add this connection to the user's map
 		user_conns.write().await.insert(conn_id, conn);
 
-		debug!("[{id:#010x}] [{user}] registered in online clients", id = conn_id, user = self.auth);
+		debug!(
+			"[{id:#010x}] [{user}] registered in online clients",
+			id = conn_id,
+			user = self.auth
+		);
 	}
 
 	/// Unregister this connection from the online clients registry
@@ -159,7 +165,11 @@ impl Connection {
 			let user_id = self.auth.get_uid();
 			let conn_id = self.id() as usize;
 			crate::unregister_from_online_clients(&self.ctx.online_clients, user_id, conn_id).await;
-			debug!("[{id:#010x}] [{user}] unregistered from online clients", id = conn_id, user = self.auth);
+			debug!(
+				"[{id:#010x}] [{user}] unregistered from online clients",
+				id = conn_id,
+				user = self.auth
+			);
 		}
 	}
 

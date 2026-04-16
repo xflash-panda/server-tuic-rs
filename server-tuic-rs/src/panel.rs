@@ -1,8 +1,6 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use panel_core::{
-	BackgroundTasks, BackgroundTasksHandle, NodeConfigEnum, PanelApi, StatsCollector, TaskConfig, UserManager,
-};
+use panel_core::{BackgroundTasks, BackgroundTasksHandle, NodeConfigEnum, PanelApi, StatsCollector, TaskConfig, UserManager};
 use panel_http::{HttpApiManager, HttpPanelConfig};
 use server_client_rs::models::TuicConfig;
 use tracing::{error, info, warn};
@@ -62,9 +60,8 @@ impl Panel {
 		};
 
 		let user_manager = Arc::new(UserManager::new(tuic_derive_key));
-		let api = Arc::new(
-			HttpApiManager::new(http_config).map_err(|e| eyre::eyre!("Failed to create HTTP API client: {}", e))?,
-		);
+		let api =
+			Arc::new(HttpApiManager::new(http_config).map_err(|e| eyre::eyre!("Failed to create HTTP API client: {}", e))?);
 		let stats_collector = Arc::new(StatsCollector::new());
 
 		Ok(Self {
