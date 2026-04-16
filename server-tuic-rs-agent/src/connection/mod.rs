@@ -10,10 +10,9 @@ use register_count::Counter;
 use tokio::{sync::RwLock as AsyncRwLock, time};
 use tracing::debug;
 use tuic::quinn::{Authenticate, Connection as Model, side};
-use uuid::Uuid;
 
 use self::{authenticated::Authenticated, udp_session::UdpSession};
-use crate::{AppContext, UserConnections, error::Error, utils::UdpRelayMode};
+use crate::{AppContext, UserConnections, error::Error, unregister_from_online_clients, utils::UdpRelayMode};
 
 mod authenticated;
 mod handle_stream;
@@ -127,11 +126,11 @@ impl Connection {
 	async fn authenticate(&self, auth: &Authenticate) -> Result<(), Error> {
 		if self.auth.get().is_some() {
 			Err(Error::DuplicatedAuth)
-		} else if let Some(uid) = self.ctx.panel_service.validate_user(&auth.uuid()).await {
+		} else if let Some(uid) = self.ctx.panel_service.validate_user(&auth.uuid()) {
 			// UUID exists in panel - authentication successful
 			self.auth.set(auth.uuid(), uid).await;
 			// Register this connection in the online clients registry
-			self.register_client(auth.uuid()).await;
+			self.register_client(uid).await;
 			Ok(())
 		} else {
 			Err(Error::AuthFailed(auth.uuid()))
@@ -139,7 +138,7 @@ impl Connection {
 	}
 
 	/// Register this connection in the online clients registry
-	async fn register_client(&self, uuid: Uuid) {
+	async fn register_client(&self, user_id: i64) {
 		let conn_id = self.id() as usize;
 		let conn = self.inner.clone();
 
@@ -147,37 +146,25 @@ impl Connection {
 		let user_conns: UserConnections = self
 			.ctx
 			.online_clients
-			.get_with(uuid, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
+			.get_with(user_id, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
 			.await;
 
 		// Add this connection to the user's map
 		user_conns.write().await.insert(conn_id, conn);
 
-		debug!("[{id:#010x}] [{uuid}] registered in online clients", id = conn_id,);
+		debug!("[{id:#010x}] [user_id={user_id}] registered in online clients", id = conn_id,);
 	}
 
 	/// Unregister this connection from the online clients registry.
-	///
-	/// To avoid a race condition where a concurrent `register_client` inserts
-	/// into the same Arc between our `drop(conns)` and `remove()`, we hold
-	/// the write lock while removing from the cache when the map is empty.
 	async fn unregister_client(&self) {
-		if let Some(uuid) = self.auth.get() {
+		if self.auth.is_authenticated() {
+			let user_id = self.auth.get_uid();
 			let conn_id = self.id() as usize;
-
-			if let Some(user_conns) = self.ctx.online_clients.get(&uuid).await {
-				let mut conns = user_conns.write().await;
-				conns.remove(&conn_id);
-
-				// Remove from cache while still holding the lock to prevent
-				// a concurrent register_client from inserting into the old Arc.
-				if conns.is_empty() {
-					self.ctx.online_clients.remove(&uuid).await;
-				}
-				drop(conns);
-
-				debug!("[{id:#010x}] [{uuid}] unregistered from online clients", id = conn_id,);
-			}
+			unregister_from_online_clients(&self.ctx.online_clients, user_id, conn_id).await;
+			debug!(
+				"[{id:#010x}] [user_id={user_id}] unregistered from online clients",
+				id = conn_id,
+			);
 		}
 	}
 

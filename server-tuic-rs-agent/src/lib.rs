@@ -7,7 +7,6 @@ use moka::future::Cache;
 use quinn::Connection as QuinnConnection;
 use tokio::sync::{RwLock as AsyncRwLock, broadcast};
 use tracing::{error, info, warn};
-use uuid::Uuid;
 
 pub mod acl;
 pub mod config;
@@ -27,9 +26,9 @@ pub use panel::{OptionalPanel, Panel};
 /// Per-user connection map: connection_id -> QuinnConnection
 pub type UserConnections = Arc<AsyncRwLock<HashMap<usize, QuinnConnection>>>;
 
-/// Online clients registry: UUID -> UserConnections
+/// Online clients registry: user_id -> UserConnections
 /// Used to track and manage active connections per user
-pub type OnlineClients = Cache<Uuid, UserConnections>;
+pub type OnlineClients = Cache<i64, UserConnections>;
 
 /// Error code for kicked clients
 const KICK_ERROR_CODE: quinn::VarInt = quinn::VarInt::from_u32(6002);
@@ -43,29 +42,29 @@ pub struct AppContext {
 }
 
 impl AppContext {
-	/// Kick users by closing all their active connections
-	/// This should be called when users are removed from the panel
-	pub async fn kick_users(&self, uuids: &[Uuid]) {
+	/// Kick users by closing all their active connections.
+	/// Called when users are removed or their UUID changes.
+	pub async fn kick_users(&self, user_ids: &[i64]) {
 		use tracing::debug;
 
-		for uuid in uuids {
-			if let Some(user_conns) = self.online_clients.get(uuid).await {
-				let conns = user_conns.read().await;
+		for &user_id in user_ids {
+			if let Some(user_conns) = self.online_clients.get(&user_id).await {
+				let mut conns = user_conns.write().await;
 				let kicked_count = conns.len();
 
 				// Close all connections for this user
 				for (conn_id, conn) in conns.iter() {
 					conn.close(KICK_ERROR_CODE, b"User removed");
-					debug!("[{id:#010x}] [{uuid}] kicked connection", id = conn_id,);
+					debug!("[{id:#010x}] [user_id={user_id}] kicked connection", id = conn_id);
 				}
 
-				drop(conns); // Release lock before removing from cache
-
-				// Remove the user from online clients cache
-				self.online_clients.remove(uuid).await;
+				// Clear the map but do NOT remove the cache entry.
+				// Same TOCTOU reasoning as unregister_from_online_clients:
+				// a concurrent register_client could insert between drop and remove.
+				conns.clear();
 
 				if kicked_count > 0 {
-					info!("Kicked {} connection(s) for removed user {}", kicked_count, uuid);
+					info!("Kicked {} connection(s) for removed user_id={}", kicked_count, user_id);
 				}
 			}
 		}
@@ -165,6 +164,23 @@ async fn run_inner(panel_service: Arc<OptionalPanel>, cfg: Config) -> eyre::Resu
 	Ok(())
 }
 
+/// Remove a connection from the online clients registry.
+/// This is the logic extracted from Connection::unregister_client for
+/// testability.
+///
+/// Note: We intentionally do NOT remove the cache entry when the inner map
+/// becomes empty. Doing so would create a TOCTOU race: between dropping the
+/// inner lock and calling cache.remove(), a concurrent register_client could
+/// insert a new connection into the same entry — and remove() would silently
+/// discard it. Empty entries are lightweight (Arc to empty HashMap) and will be
+/// reused on reconnect. The kick_users path handles cleanup when users are
+/// actually removed.
+pub(crate) async fn unregister_from_online_clients(online_clients: &OnlineClients, user_id: i64, conn_id: usize) {
+	if let Some(user_conns) = online_clients.get(&user_id).await {
+		user_conns.write().await.remove(&conn_id);
+	}
+}
+
 /// Wait for shutdown signal (SIGINT or SIGTERM)
 async fn wait_for_shutdown_signal() {
 	#[cfg(unix)]
@@ -193,219 +209,28 @@ async fn wait_for_shutdown_signal() {
 
 #[cfg(test)]
 mod tests {
-	use std::{collections::HashMap, sync::Arc};
+	use super::*;
 
-	use moka::future::Cache;
-	use tokio::sync::RwLock as AsyncRwLock;
-	use uuid::Uuid;
-
-	/// Test the OnlineClients data structure behavior
-	/// We can't test with real QuinnConnection, so we use a mock type
-	type MockConnection = Arc<String>; // Simple mock for testing
-	type MockUserConnections = Arc<AsyncRwLock<HashMap<usize, MockConnection>>>;
-	type MockOnlineClients = Cache<Uuid, MockUserConnections>;
-
+	/// Verifies that unregister_from_online_clients preserves the cache entry,
+	/// so a concurrent register_client won't lose its connection reference.
 	#[tokio::test]
-	async fn test_online_clients_register_and_get() {
-		let online_clients: MockOnlineClients = Cache::builder().build();
-		let uuid = Uuid::new_v4();
-		let conn_id: usize = 12345;
-		let mock_conn = Arc::new("connection_1".to_string());
+	async fn test_unregister_toctou_race() {
+		let online_clients: OnlineClients = Cache::builder().build();
+		let user_id: i64 = 42;
 
-		// Register a connection
-		let user_conns: MockUserConnections = online_clients
-			.get_with(uuid, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
-			.await;
-		user_conns.write().await.insert(conn_id, mock_conn.clone());
-
-		// Verify the connection is registered
-		let retrieved = online_clients.get(&uuid).await.unwrap();
-		let conns = retrieved.read().await;
-		assert_eq!(conns.len(), 1);
-		assert!(conns.contains_key(&conn_id));
-		assert_eq!(*conns.get(&conn_id).unwrap(), mock_conn);
-	}
-
-	#[tokio::test]
-	async fn test_online_clients_multiple_connections_per_user() {
-		let online_clients: MockOnlineClients = Cache::builder().build();
-		let uuid = Uuid::new_v4();
-
-		// Register multiple connections for the same user
-		let user_conns: MockUserConnections = online_clients
-			.get_with(uuid, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
+		let entry: UserConnections = online_clients
+			.get_with(user_id, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
 			.await;
 
-		{
-			let mut conns = user_conns.write().await;
-			conns.insert(1, Arc::new("conn_1".to_string()));
-			conns.insert(2, Arc::new("conn_2".to_string()));
-			conns.insert(3, Arc::new("conn_3".to_string()));
-		}
+		unregister_from_online_clients(&online_clients, user_id, 1).await;
 
-		// Verify all connections are registered
-		let retrieved = online_clients.get(&uuid).await.unwrap();
-		let conns = retrieved.read().await;
-		assert_eq!(conns.len(), 3);
-	}
-
-	#[tokio::test]
-	async fn test_online_clients_unregister() {
-		let online_clients: MockOnlineClients = Cache::builder().build();
-		let uuid = Uuid::new_v4();
-		let conn_id: usize = 12345;
-
-		// Register a connection
-		let user_conns: MockUserConnections = online_clients
-			.get_with(uuid, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
-			.await;
-		user_conns.write().await.insert(conn_id, Arc::new("conn".to_string()));
-
-		// Unregister the connection
-		{
-			let mut conns = user_conns.write().await;
-			conns.remove(&conn_id);
-
-			// If no more connections, remove user entry
-			if conns.is_empty() {
-				drop(conns);
-				online_clients.remove(&uuid).await;
-			}
-		}
-
-		// Verify the user entry is removed
-		assert!(online_clients.get(&uuid).await.is_none());
-	}
-
-	#[tokio::test]
-	async fn test_online_clients_unregister_keeps_other_connections() {
-		let online_clients: MockOnlineClients = Cache::builder().build();
-		let uuid = Uuid::new_v4();
-
-		// Register multiple connections
-		let user_conns: MockUserConnections = online_clients
-			.get_with(uuid, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
+		let entry_after: UserConnections = online_clients
+			.get_with(user_id, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
 			.await;
 
-		{
-			let mut conns = user_conns.write().await;
-			conns.insert(1, Arc::new("conn_1".to_string()));
-			conns.insert(2, Arc::new("conn_2".to_string()));
-		}
-
-		// Unregister one connection
-		{
-			let mut conns = user_conns.write().await;
-			conns.remove(&1);
-			// Not empty, so don't remove user entry
-			assert!(!conns.is_empty());
-		}
-
-		// Verify the other connection is still there
-		let retrieved = online_clients.get(&uuid).await.unwrap();
-		let conns = retrieved.read().await;
-		assert_eq!(conns.len(), 1);
-		assert!(conns.contains_key(&2));
-	}
-
-	#[tokio::test]
-	async fn test_online_clients_multiple_users() {
-		let online_clients: MockOnlineClients = Cache::builder().build();
-		let uuid1 = Uuid::new_v4();
-		let uuid2 = Uuid::new_v4();
-
-		// Register connections for user 1
-		let user1_conns: MockUserConnections = online_clients
-			.get_with(uuid1, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
-			.await;
-		user1_conns.write().await.insert(1, Arc::new("user1_conn".to_string()));
-
-		// Register connections for user 2
-		let user2_conns: MockUserConnections = online_clients
-			.get_with(uuid2, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
-			.await;
-		user2_conns.write().await.insert(2, Arc::new("user2_conn".to_string()));
-
-		// Verify both users have their connections
-		assert!(online_clients.get(&uuid1).await.is_some());
-		assert!(online_clients.get(&uuid2).await.is_some());
-
-		// Remove user1
-		online_clients.remove(&uuid1).await;
-
-		// Verify user1 is gone but user2 still exists
-		assert!(online_clients.get(&uuid1).await.is_none());
-		assert!(online_clients.get(&uuid2).await.is_some());
-	}
-
-	#[tokio::test]
-	async fn test_kick_users_simulation() {
-		let online_clients: MockOnlineClients = Cache::builder().build();
-		let uuid = Uuid::new_v4();
-
-		// Register multiple connections
-		let user_conns: MockUserConnections = online_clients
-			.get_with(uuid, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
-			.await;
-
-		{
-			let mut conns = user_conns.write().await;
-			conns.insert(1, Arc::new("conn_1".to_string()));
-			conns.insert(2, Arc::new("conn_2".to_string()));
-			conns.insert(3, Arc::new("conn_3".to_string()));
-		}
-
-		// Simulate kick_users: iterate and "close" all connections
-		if let Some(user_conns) = online_clients.get(&uuid).await {
-			let conns = user_conns.read().await;
-			let kicked_count = conns.len();
-
-			// In real code, we would call conn.close() here
-			for (conn_id, _conn) in conns.iter() {
-				// Simulating: conn.close(KICK_ERROR_CODE, b"User removed");
-				assert!(*conn_id >= 1 && *conn_id <= 3);
-			}
-
-			drop(conns);
-			online_clients.remove(&uuid).await;
-
-			assert_eq!(kicked_count, 3);
-		}
-
-		// Verify user is removed
-		assert!(online_clients.get(&uuid).await.is_none());
-	}
-
-	#[tokio::test]
-	async fn test_concurrent_register_same_user() {
-		let online_clients: MockOnlineClients = Cache::builder().build();
-		let uuid = Uuid::new_v4();
-
-		// Simulate concurrent registrations for the same user
-		let clients_clone = online_clients.clone();
-		let uuid_clone = uuid;
-
-		let handle1 = tokio::spawn(async move {
-			let user_conns: MockUserConnections = clients_clone
-				.get_with(uuid_clone, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
-				.await;
-			user_conns.write().await.insert(1, Arc::new("conn_1".to_string()));
-		});
-
-		let clients_clone2 = online_clients.clone();
-		let handle2 = tokio::spawn(async move {
-			let user_conns: MockUserConnections = clients_clone2
-				.get_with(uuid, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
-				.await;
-			user_conns.write().await.insert(2, Arc::new("conn_2".to_string()));
-		});
-
-		handle1.await.unwrap();
-		handle2.await.unwrap();
-
-		// Both connections should be registered
-		let retrieved = online_clients.get(&uuid).await.unwrap();
-		let conns = retrieved.read().await;
-		assert_eq!(conns.len(), 2);
+		assert!(
+			Arc::ptr_eq(&entry, &entry_after),
+			"Cache entry should be preserved after unregister to avoid TOCTOU race"
+		);
 	}
 }

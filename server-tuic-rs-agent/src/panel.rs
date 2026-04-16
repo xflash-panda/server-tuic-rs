@@ -1,20 +1,21 @@
-use std::{
-	collections::{HashMap, HashSet},
-	path::PathBuf,
-	sync::Arc,
-	time::Duration,
-};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use panel_connect_rpc::{ConnectRpcApiManager, ConnectRpcPanelConfig};
-use panel_core::{
-	BackgroundTasks, BackgroundTasksHandle, NodeConfigEnum, PanelApi, StatsCollector, TaskConfig, User, UserManager,
-};
+use panel_core::{BackgroundTasks, BackgroundTasksHandle, NodeConfigEnum, PanelApi, StatsCollector, TaskConfig, UserManager};
 use server_client_rs::models::TuicConfig;
-use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::{AppContext, utils::CongestionController};
+
+/// Derive key function for TUIC: parse UUID string into Uuid.
+/// Invalid UUIDs map to Uuid::nil() (will never match a real auth attempt).
+fn tuic_derive_key(uuid_str: &str) -> Uuid {
+	Uuid::parse_str(uuid_str).unwrap_or_else(|e| {
+		warn!("Invalid UUID format '{}': {}", uuid_str, e);
+		Uuid::nil()
+	})
+}
 
 /// Configuration for the panel service
 #[derive(Debug, Clone)]
@@ -41,74 +42,13 @@ pub struct PanelConfig {
 	pub ca_cert_path:             Option<String>,
 }
 
-/// User map: UUID -> user_id (i64), maintained separately for TUIC's UUID-based
-/// auth
-type UserMap = HashMap<Uuid, i64>;
-
-/// Wrapper around ConnectRpcApiManager that intercepts fetch_users()
-/// to also update the TUIC-specific UUID -> user_id map.
-///
-/// Key ordering: on fetch_users(), we compute which UUIDs will be kicked
-/// (removed/uuid-changed) BEFORE rebuilding the UUID map, then store them
-/// in `pending_kicks` for the on_user_diff callback to consume.
-struct TuicPanelApi {
-	inner:         ConnectRpcApiManager,
-	/// Shared UUID map updated on every user fetch
-	users:         Arc<RwLock<UserMap>>,
-	/// UUIDs that should be kicked after the next user diff.
-	/// Computed during fetch_users() while old UUID map is still available.
-	pending_kicks: Arc<RwLock<Vec<Uuid>>>,
-}
-
-#[async_trait::async_trait]
-impl PanelApi for TuicPanelApi {
-	async fn initialize(&self, port: u16) -> anyhow::Result<()> {
-		self.inner.initialize(port).await
-	}
-
-	async fn fetch_users(&self) -> anyhow::Result<Option<Vec<User>>> {
-		let result = self.inner.fetch_users().await?;
-		if let Some(ref new_users) = result {
-			// Compute UUIDs to kick BEFORE rebuilding the map.
-			// After rebuild, removed users' UUIDs are gone from the map.
-			let kicks = {
-				let old_map = self.users.read().await;
-				compute_kicks(&old_map, new_users)
-			};
-
-			*self.pending_kicks.write().await = kicks;
-
-			// Now rebuild the UUID map with new users
-			rebuild_uuid_map(&self.users, new_users).await;
-		}
-		Ok(result)
-	}
-
-	async fn submit_traffic(&self, data: Vec<panel_core::UserTraffic>) -> anyhow::Result<()> {
-		self.inner.submit_traffic(data).await
-	}
-
-	async fn heartbeat(&self) -> anyhow::Result<()> {
-		self.inner.heartbeat().await
-	}
-
-	async fn unregister(&self) -> anyhow::Result<()> {
-		self.inner.unregister().await
-	}
-
-	async fn fetch_config(&self) -> anyhow::Result<NodeConfigEnum> {
-		self.inner.fetch_config().await
-	}
-}
-
-/// Panel service implementation backed by server-panel-rs
+/// Panel service implementation backed by server-panel-rs (ConnectRPC
+/// transport)
 pub struct Panel {
-	api:             Arc<TuicPanelApi>,
+	api:             Arc<ConnectRpcApiManager>,
 	config:          PanelConfig,
-	user_manager:    Arc<UserManager>,
+	user_manager:    Arc<UserManager<Uuid>>,
 	stats_collector: Arc<StatsCollector>,
-	/// UUID -> user_id mapping for TUIC UUID-based authentication
-	users:           Arc<RwLock<UserMap>>,
 }
 
 impl Panel {
@@ -125,16 +65,8 @@ impl Panel {
 			ca_cert_path: config.ca_cert_path.clone(),
 		};
 
-		let users: Arc<RwLock<UserMap>> = Arc::new(RwLock::new(HashMap::new()));
-
-		let pending_kicks: Arc<RwLock<Vec<Uuid>>> = Arc::new(RwLock::new(Vec::new()));
-
-		let api = Arc::new(TuicPanelApi {
-			inner:         ConnectRpcApiManager::new(rpc_config),
-			users:         users.clone(),
-			pending_kicks: pending_kicks.clone(),
-		});
-		let user_manager = Arc::new(UserManager::new());
+		let api = Arc::new(ConnectRpcApiManager::new(rpc_config));
+		let user_manager = Arc::new(UserManager::new(tuic_derive_key));
 		let stats_collector = Arc::new(StatsCollector::new());
 
 		Ok(Self {
@@ -142,7 +74,6 @@ impl Panel {
 			config,
 			user_manager,
 			stats_collector,
-			users,
 		})
 	}
 
@@ -151,14 +82,15 @@ impl Panel {
 		&self.stats_collector
 	}
 
-	/// Validate a user by UUID, returns the user_id if valid
-	pub async fn validate_user(&self, uuid: &Uuid) -> Option<i64> {
-		self.users.read().await.get(uuid).copied()
+	/// Validate a user by UUID, returns the user_id if valid.
+	/// Lock-free via ArcSwap — no async needed.
+	pub fn validate_user(&self, uuid: &Uuid) -> Option<i64> {
+		self.user_manager.authenticate(uuid)
 	}
 
 	/// Get all user IDs (for traffic stats initialization)
-	pub async fn get_all_user_ids(&self) -> Vec<i64> {
-		self.users.read().await.values().copied().collect()
+	pub fn get_all_user_ids(&self) -> Vec<i64> {
+		self.user_manager.get_users().values().copied().collect()
 	}
 
 	/// Initialize the panel: fetch config, register, fetch users
@@ -225,7 +157,7 @@ impl Panel {
 
 		info!("Node registered successfully");
 
-		// Fetch initial users (this also updates the UUID map via TuicPanelApi wrapper)
+		// Fetch initial users
 		if let Some(users) = self
 			.api
 			.fetch_users()
@@ -255,25 +187,20 @@ impl Panel {
 			Duration::from_secs(self.config.heartbeat_interval),
 		);
 
-		let pending_kicks = self.api.pending_kicks.clone();
-
 		BackgroundTasks::new(
 			task_config,
 			self.api.clone(),
 			self.user_manager.clone(),
 			self.stats_collector.clone(),
 		)
-		.on_user_diff(Arc::new(move |_diff| {
-			// Consume pending_kicks computed during fetch_users()
-			// (before the UUID map was rebuilt, so old UUIDs are captured)
+		.on_user_diff(Arc::new(move |diff| {
 			let ctx = ctx.clone();
-			let pending_kicks = pending_kicks.clone();
-
 			tokio::spawn(async move {
-				let uuids_to_kick: Vec<Uuid> = std::mem::take(&mut *pending_kicks.write().await);
-				if !uuids_to_kick.is_empty() {
-					info!("Kicking {} user(s) with stale UUIDs", uuids_to_kick.len());
-					ctx.kick_users(&uuids_to_kick).await;
+				let mut ids_to_kick = diff.removed_ids;
+				ids_to_kick.extend(diff.uuid_changed_ids);
+				if !ids_to_kick.is_empty() {
+					info!("Kicking {} user(s) (removed/uuid-changed)", ids_to_kick.len());
+					ctx.kick_users(&ids_to_kick).await;
 				}
 			});
 		}))
@@ -295,46 +222,6 @@ impl Panel {
 
 		info!("Panel service closed");
 		Ok(())
-	}
-}
-
-/// Compute which UUIDs should be kicked based on the old UUID map and new user
-/// list.
-///
-/// A UUID is kicked when:
-/// - The user_id no longer exists in the new user list (user removed)
-/// - The user_id exists but its UUID has changed (UUID rotation)
-fn compute_kicks(old_map: &UserMap, new_users: &[User]) -> Vec<Uuid> {
-	let new_ids: HashSet<i64> = new_users.iter().map(|u| u.id).collect();
-	let new_uuid_by_id: HashMap<i64, &str> = new_users.iter().map(|u| (u.id, u.uuid.as_str())).collect();
-
-	let mut kicks = Vec::new();
-	for (uuid, uid) in old_map.iter() {
-		if !new_ids.contains(uid) {
-			// User removed
-			kicks.push(*uuid);
-		} else if let Some(new_uuid_str) = new_uuid_by_id.get(uid) {
-			// User exists but UUID may have changed
-			if let Ok(new_uuid) = Uuid::parse_str(new_uuid_str) {
-				if &new_uuid != uuid {
-					kicks.push(*uuid);
-				}
-			}
-		}
-	}
-	kicks
-}
-
-/// Rebuild the UUID -> user_id map from a list of users
-async fn rebuild_uuid_map(users_lock: &RwLock<UserMap>, users: &[User]) {
-	let mut user_map = users_lock.write().await;
-	user_map.clear();
-	for user in users {
-		if let Ok(uuid) = Uuid::parse_str(&user.uuid) {
-			user_map.insert(uuid, user.id);
-		} else {
-			warn!("Invalid UUID format for user {}: {}", user.id, user.uuid);
-		}
 	}
 }
 
@@ -368,9 +255,9 @@ impl OptionalPanel {
 
 	/// Validate a user by UUID, returns the user_id if valid
 	/// Returns None if panel is disabled or user is not found
-	pub async fn validate_user(&self, uuid: &Uuid) -> Option<i64> {
+	pub fn validate_user(&self, uuid: &Uuid) -> Option<i64> {
 		if let Some(panel) = &self.inner {
-			panel.validate_user(uuid).await
+			panel.validate_user(uuid)
 		} else {
 			None
 		}
@@ -378,9 +265,9 @@ impl OptionalPanel {
 
 	/// Get all user IDs (for traffic stats initialization)
 	/// Returns empty vec if panel is disabled
-	pub async fn get_all_user_ids(&self) -> Vec<i64> {
+	pub fn get_all_user_ids(&self) -> Vec<i64> {
 		if let Some(panel) = &self.inner {
-			panel.get_all_user_ids().await
+			panel.get_all_user_ids()
 		} else {
 			Vec::new()
 		}
@@ -421,183 +308,6 @@ impl OptionalPanel {
 mod tests {
 	use super::*;
 
-	fn make_user(id: i64, uuid: &str) -> User {
-		User {
-			id,
-			uuid: uuid.to_string(),
-		}
-	}
-
-	fn make_uuid_map(entries: &[(Uuid, i64)]) -> UserMap {
-		entries.iter().cloned().collect()
-	}
-
-	// ── compute_kicks tests ──────────────────────────────────────────────
-
-	#[test]
-	fn test_compute_kicks_no_change() {
-		let uuid1 = Uuid::new_v4();
-		let uuid2 = Uuid::new_v4();
-		let old_map = make_uuid_map(&[(uuid1, 1), (uuid2, 2)]);
-		let new_users = vec![make_user(1, &uuid1.to_string()), make_user(2, &uuid2.to_string())];
-
-		let kicks = compute_kicks(&old_map, &new_users);
-		assert!(kicks.is_empty(), "No users changed, no kicks expected");
-	}
-
-	#[test]
-	fn test_compute_kicks_user_removed() {
-		let uuid1 = Uuid::new_v4();
-		let uuid2 = Uuid::new_v4();
-		let old_map = make_uuid_map(&[(uuid1, 1), (uuid2, 2)]);
-		// User 2 removed from new list
-		let new_users = vec![make_user(1, &uuid1.to_string())];
-
-		let kicks = compute_kicks(&old_map, &new_users);
-		assert_eq!(kicks.len(), 1);
-		assert_eq!(kicks[0], uuid2);
-	}
-
-	#[test]
-	fn test_compute_kicks_all_users_removed() {
-		let uuid1 = Uuid::new_v4();
-		let uuid2 = Uuid::new_v4();
-		let old_map = make_uuid_map(&[(uuid1, 1), (uuid2, 2)]);
-		let new_users = vec![];
-
-		let kicks = compute_kicks(&old_map, &new_users);
-		assert_eq!(kicks.len(), 2);
-		assert!(kicks.contains(&uuid1));
-		assert!(kicks.contains(&uuid2));
-	}
-
-	#[test]
-	fn test_compute_kicks_uuid_changed() {
-		let old_uuid = Uuid::new_v4();
-		let new_uuid = Uuid::new_v4();
-		let old_map = make_uuid_map(&[(old_uuid, 1)]);
-		// Same user_id but different UUID
-		let new_users = vec![make_user(1, &new_uuid.to_string())];
-
-		let kicks = compute_kicks(&old_map, &new_users);
-		assert_eq!(kicks.len(), 1);
-		assert_eq!(kicks[0], old_uuid, "Old UUID should be kicked");
-	}
-
-	#[test]
-	fn test_compute_kicks_new_user_added() {
-		let uuid1 = Uuid::new_v4();
-		let uuid_new = Uuid::new_v4();
-		let old_map = make_uuid_map(&[(uuid1, 1)]);
-		// Existing user stays, new user added
-		let new_users = vec![make_user(1, &uuid1.to_string()), make_user(2, &uuid_new.to_string())];
-
-		let kicks = compute_kicks(&old_map, &new_users);
-		assert!(kicks.is_empty(), "New user should not cause any kicks");
-	}
-
-	#[test]
-	fn test_compute_kicks_empty_old_map() {
-		let old_map = make_uuid_map(&[]);
-		let new_users = vec![make_user(1, &Uuid::new_v4().to_string())];
-
-		let kicks = compute_kicks(&old_map, &new_users);
-		assert!(kicks.is_empty(), "Empty old map should produce no kicks");
-	}
-
-	#[test]
-	fn test_compute_kicks_mixed_changes() {
-		let uuid1 = Uuid::new_v4();
-		let uuid2 = Uuid::new_v4();
-		let uuid3 = Uuid::new_v4();
-		let new_uuid2 = Uuid::new_v4();
-		let old_map = make_uuid_map(&[(uuid1, 1), (uuid2, 2), (uuid3, 3)]);
-		let new_users = vec![
-			make_user(1, &uuid1.to_string()),     // unchanged
-			make_user(2, &new_uuid2.to_string()), // UUID changed
-			// user 3 removed
-			make_user(4, &Uuid::new_v4().to_string()), // new user
-		];
-
-		let kicks = compute_kicks(&old_map, &new_users);
-		assert_eq!(kicks.len(), 2);
-		assert!(kicks.contains(&uuid2), "Changed UUID should be kicked");
-		assert!(kicks.contains(&uuid3), "Removed user should be kicked");
-		assert!(!kicks.contains(&uuid1), "Unchanged user should not be kicked");
-	}
-
-	#[test]
-	fn test_compute_kicks_invalid_new_uuid_no_kick() {
-		let uuid1 = Uuid::new_v4();
-		let old_map = make_uuid_map(&[(uuid1, 1)]);
-		// New user has invalid UUID format - the parse fails, so no kick
-		let new_users = vec![make_user(1, "not-a-valid-uuid")];
-
-		let kicks = compute_kicks(&old_map, &new_users);
-		assert!(kicks.is_empty(), "Invalid new UUID should not trigger a kick");
-	}
-
-	// ── rebuild_uuid_map tests ───────────────────────────────────────────
-
-	#[tokio::test]
-	async fn test_rebuild_uuid_map_basic() {
-		let users_lock = RwLock::new(HashMap::new());
-		let uuid1 = Uuid::new_v4();
-		let uuid2 = Uuid::new_v4();
-
-		let users = vec![make_user(1, &uuid1.to_string()), make_user(2, &uuid2.to_string())];
-
-		rebuild_uuid_map(&users_lock, &users).await;
-
-		let map = users_lock.read().await;
-		assert_eq!(map.len(), 2);
-		assert_eq!(map.get(&uuid1), Some(&1));
-		assert_eq!(map.get(&uuid2), Some(&2));
-	}
-
-	#[tokio::test]
-	async fn test_rebuild_uuid_map_replaces_old_entries() {
-		let old_uuid = Uuid::new_v4();
-		let new_uuid = Uuid::new_v4();
-		let users_lock = RwLock::new(HashMap::from([(old_uuid, 99)]));
-
-		let users = vec![make_user(1, &new_uuid.to_string())];
-
-		rebuild_uuid_map(&users_lock, &users).await;
-
-		let map = users_lock.read().await;
-		assert_eq!(map.len(), 1);
-		assert!(map.get(&old_uuid).is_none(), "Old UUID should be gone");
-		assert_eq!(map.get(&new_uuid), Some(&1));
-	}
-
-	#[tokio::test]
-	async fn test_rebuild_uuid_map_skips_invalid_uuids() {
-		let users_lock = RwLock::new(HashMap::new());
-		let valid_uuid = Uuid::new_v4();
-
-		let users = vec![make_user(1, &valid_uuid.to_string()), make_user(2, "invalid-uuid")];
-
-		rebuild_uuid_map(&users_lock, &users).await;
-
-		let map = users_lock.read().await;
-		assert_eq!(map.len(), 1);
-		assert_eq!(map.get(&valid_uuid), Some(&1));
-	}
-
-	#[tokio::test]
-	async fn test_rebuild_uuid_map_empty_list_clears_map() {
-		let uuid = Uuid::new_v4();
-		let users_lock = RwLock::new(HashMap::from([(uuid, 1)]));
-
-		rebuild_uuid_map(&users_lock, &[]).await;
-
-		let map = users_lock.read().await;
-		assert!(map.is_empty());
-	}
-
-	// ── OptionalPanel tests ──────────────────────────────────────────────
-
 	#[test]
 	fn test_optional_panel_disabled() {
 		let panel = OptionalPanel::disabled();
@@ -606,16 +316,16 @@ mod tests {
 		assert!(panel.stats_collector().is_none());
 	}
 
-	#[tokio::test]
-	async fn test_optional_panel_disabled_validate_user() {
+	#[test]
+	fn test_optional_panel_disabled_validate_user() {
 		let panel = OptionalPanel::disabled();
 		let uuid = Uuid::new_v4();
-		assert_eq!(panel.validate_user(&uuid).await, None);
+		assert_eq!(panel.validate_user(&uuid), None);
 	}
 
-	#[tokio::test]
-	async fn test_optional_panel_disabled_get_all_user_ids() {
+	#[test]
+	fn test_optional_panel_disabled_get_all_user_ids() {
 		let panel = OptionalPanel::disabled();
-		assert!(panel.get_all_user_ids().await.is_empty());
+		assert!(panel.get_all_user_ids().is_empty());
 	}
 }
