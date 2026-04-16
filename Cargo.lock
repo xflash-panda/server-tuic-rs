@@ -1514,8 +1514,8 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "panel-core"
-version = "0.1.4"
-source = "git+https://github.com/xflash-panda/server-panel-rs?tag=v0.1.4#24ea52a1bb9426ccdfe171803b32f8d78467be3c"
+version = "0.1.6"
+source = "git+https://github.com/xflash-panda/server-panel-rs?tag=v0.1.6#4f4154566a8334078ef4ba78058a54a5c9c27cce"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1530,13 +1530,14 @@ dependencies = [
 
 [[package]]
 name = "panel-http"
-version = "0.1.4"
-source = "git+https://github.com/xflash-panda/server-panel-rs?tag=v0.1.4#24ea52a1bb9426ccdfe171803b32f8d78467be3c"
+version = "0.1.6"
+source = "git+https://github.com/xflash-panda/server-panel-rs?tag=v0.1.6#4f4154566a8334078ef4ba78058a54a5c9c27cce"
 dependencies = [
  "anyhow",
  "async-trait",
  "hostname",
  "panel-core",
+ "serde",
  "serde_json",
  "server-client-rs",
  "tokio",
@@ -2373,7 +2374,7 @@ dependencies = [
 
 [[package]]
 name = "server-tuic-rs"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "acl-engine-rs",
  "anyhow",
@@ -2572,7 +2573,7 @@ dependencies = [
 
 [[package]]
 name = "tests"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "aws-lc-rs",
  "eyre",
@@ -2994,7 +2995,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuic-core"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "bytes",
  "eyre",
