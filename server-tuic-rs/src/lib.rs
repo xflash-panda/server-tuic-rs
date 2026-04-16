@@ -7,7 +7,6 @@ use moka::future::Cache;
 use quinn::Connection as QuinnConnection;
 use tokio::sync::{RwLock as AsyncRwLock, broadcast};
 use tracing::{error, info, warn};
-use uuid::Uuid;
 
 pub mod acl;
 pub mod config;
@@ -26,9 +25,9 @@ pub use panel::{OptionalPanel, Panel};
 /// Per-user connection map: connection_id -> QuinnConnection
 pub type UserConnections = Arc<AsyncRwLock<HashMap<usize, QuinnConnection>>>;
 
-/// Online clients registry: UUID -> UserConnections
+/// Online clients registry: user_id -> UserConnections
 /// Used to track and manage active connections per user
-pub type OnlineClients = Cache<Uuid, UserConnections>;
+pub type OnlineClients = Cache<i64, UserConnections>;
 
 /// Error code for kicked clients
 const KICK_ERROR_CODE: quinn::VarInt = quinn::VarInt::from_u32(6002);
@@ -42,29 +41,29 @@ pub struct AppContext {
 }
 
 impl AppContext {
-	/// Kick users by closing all their active connections
-	/// This should be called when users are removed from the panel
-	pub async fn kick_users(&self, uuids: &[Uuid]) {
+	/// Kick users by closing all their active connections.
+	/// Called when users are removed or their UUID changes.
+	pub async fn kick_users(&self, user_ids: &[i64]) {
 		use tracing::debug;
 
-		for uuid in uuids {
-			if let Some(user_conns) = self.online_clients.get(uuid).await {
-				let conns = user_conns.read().await;
+		for &user_id in user_ids {
+			if let Some(user_conns) = self.online_clients.get(&user_id).await {
+				let mut conns = user_conns.write().await;
 				let kicked_count = conns.len();
 
 				// Close all connections for this user
 				for (conn_id, conn) in conns.iter() {
 					conn.close(KICK_ERROR_CODE, b"User removed");
-					debug!("[{id:#010x}] [{uuid}] kicked connection", id = conn_id,);
+					debug!("[{id:#010x}] [user_id={user_id}] kicked connection", id = conn_id);
 				}
 
-				drop(conns); // Release lock before removing from cache
-
-				// Remove the user from online clients cache
-				self.online_clients.remove(uuid).await;
+				// Clear the map but do NOT remove the cache entry.
+				// Same TOCTOU reasoning as unregister_from_online_clients:
+				// a concurrent register_client could insert between drop and remove.
+				conns.clear();
 
 				if kicked_count > 0 {
-					info!("Kicked {} connection(s) for removed user {}", kicked_count, uuid);
+					info!("Kicked {} connection(s) for removed user_id={}", kicked_count, user_id);
 				}
 			}
 		}
@@ -172,8 +171,8 @@ async fn run_inner(panel_service: Arc<OptionalPanel>, cfg: Config) -> eyre::Resu
 /// discard it. Empty entries are lightweight (Arc to empty HashMap) and will be
 /// reused on reconnect. The kick_users path handles cleanup when users are
 /// actually removed.
-pub(crate) async fn unregister_from_online_clients(online_clients: &OnlineClients, uuid: &Uuid, conn_id: usize) {
-	if let Some(user_conns) = online_clients.get(uuid).await {
+pub(crate) async fn unregister_from_online_clients(online_clients: &OnlineClients, user_id: i64, conn_id: usize) {
+	if let Some(user_conns) = online_clients.get(&user_id).await {
 		user_conns.write().await.remove(&conn_id);
 	}
 }
@@ -213,16 +212,16 @@ mod tests {
 	#[tokio::test]
 	async fn test_unregister_toctou_race() {
 		let online_clients: OnlineClients = Cache::builder().build();
-		let uuid = Uuid::new_v4();
+		let user_id: i64 = 42;
 
 		let entry: UserConnections = online_clients
-			.get_with(uuid, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
+			.get_with(user_id, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
 			.await;
 
-		unregister_from_online_clients(&online_clients, &uuid, 1).await;
+		unregister_from_online_clients(&online_clients, user_id, 1).await;
 
 		let entry_after: UserConnections = online_clients
-			.get_with(uuid, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
+			.get_with(user_id, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
 			.await;
 
 		assert!(

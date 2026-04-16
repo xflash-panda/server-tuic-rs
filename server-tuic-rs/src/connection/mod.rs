@@ -10,7 +10,6 @@ use register_count::Counter;
 use tokio::{sync::RwLock as AsyncRwLock, time};
 use tracing::debug;
 use tuic::quinn::{Authenticate, Connection as Model, side};
-use uuid::Uuid;
 
 use self::{authenticated::Authenticated, udp_session::UdpSession};
 use crate::{AppContext, UserConnections, error::Error, utils::UdpRelayMode};
@@ -126,19 +125,20 @@ impl Connection {
 	async fn authenticate(&self, auth: &Authenticate) -> Result<(), Error> {
 		if self.auth.get().is_some() {
 			Err(Error::DuplicatedAuth)
-		} else if let Some(uid) = self.ctx.panel_service.validate_user(&auth.uuid()).await {
+		} else if let Some(uid) = self.ctx.panel_service.validate_user(&auth.uuid()) {
 			// UUID exists in panel - authentication successful
 			self.auth.set(auth.uuid(), uid).await;
-			// Register this connection in the online clients registry
-			self.register_client(auth.uuid()).await;
+			// Register this connection in the online clients registry (keyed by user_id)
+			self.register_client(uid).await;
 			Ok(())
 		} else {
 			Err(Error::AuthFailed(auth.uuid()))
 		}
 	}
 
-	/// Register this connection in the online clients registry
-	async fn register_client(&self, uuid: Uuid) {
+	/// Register this connection in the online clients registry (keyed by
+	/// user_id)
+	async fn register_client(&self, user_id: i64) {
 		let conn_id = self.id() as usize;
 		let conn = self.inner.clone();
 
@@ -146,21 +146,30 @@ impl Connection {
 		let user_conns: UserConnections = self
 			.ctx
 			.online_clients
-			.get_with(uuid, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
+			.get_with(user_id, async { Arc::new(AsyncRwLock::new(HashMap::new())) })
 			.await;
 
 		// Add this connection to the user's map
 		user_conns.write().await.insert(conn_id, conn);
 
-		debug!("[{id:#010x}] [{uuid}] registered in online clients", id = conn_id,);
+		debug!(
+			"[{id:#010x}] [{user}] registered in online clients",
+			id = conn_id,
+			user = self.auth
+		);
 	}
 
 	/// Unregister this connection from the online clients registry
 	async fn unregister_client(&self) {
-		if let Some(uuid) = self.auth.get() {
+		if self.auth.is_authenticated() {
+			let user_id = self.auth.get_uid();
 			let conn_id = self.id() as usize;
-			crate::unregister_from_online_clients(&self.ctx.online_clients, &uuid, conn_id).await;
-			debug!("[{id:#010x}] [{uuid}] unregistered from online clients", id = conn_id,);
+			crate::unregister_from_online_clients(&self.ctx.online_clients, user_id, conn_id).await;
+			debug!(
+				"[{id:#010x}] [{user}] unregistered from online clients",
+				id = conn_id,
+				user = self.auth
+			);
 		}
 	}
 

@@ -60,13 +60,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Configure private deps access
-        run: git config --global url."https://x-access-token:${{ secrets.GH_PRIVATE_DEPS_TOKEN }}@github.com/".insteadOf "https://github.com/"
-
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Configure git for private repos
+        run: git config --global url."https://${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
 
       - name: Install cross
         if: matrix.cross
@@ -76,14 +76,10 @@ jobs:
         with:
           key: ${{ matrix.target }}-${{ matrix.cross && 'cross' || 'cargo' }}
 
-      - name: Pre-fetch dependencies
-        if: matrix.cross
-        run: cargo fetch
-
       - name: Build (cross)
         if: matrix.cross
         env:
-          GH_PAT: ${{ secrets.GH_PRIVATE_DEPS_TOKEN }}
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: cross build --release -p server-tuic-rs --target ${{ matrix.target }}
 
       - name: Build (cargo)
