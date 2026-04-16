@@ -50,13 +50,13 @@ impl Panel {
 	/// Create a new Panel instance
 	pub fn new(config: PanelConfig) -> eyre::Result<Self> {
 		let http_config = HttpPanelConfig {
-			api:             config.api_host.clone(),
-			token:           config.token.clone(),
-			node_id:         config.node_id as i64,
-			node_type:       panel_core::NodeType::Tuic,
-			api_timeout:     config.timeout,
-			debug:           false,
-			state_file_path: config.data_dir.join("state"),
+			api:         config.api_host.clone(),
+			token:       config.token.clone(),
+			node_id:     config.node_id as i64,
+			node_type:   panel_core::NodeType::Tuic,
+			api_timeout: config.timeout,
+			debug:       false,
+			data_dir:    config.data_dir.clone(),
 		};
 
 		let user_manager = Arc::new(UserManager::new(tuic_derive_key));
