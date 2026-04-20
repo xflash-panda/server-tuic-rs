@@ -2621,7 +2621,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "server-tuic-rs-agent"
+name = "server-tuic-agent"
 version = "0.4.5"
 dependencies = [
  "acl-engine-rs",
@@ -2832,7 +2832,7 @@ dependencies = [
  "rustls",
  "serial_test",
  "server-client-rs 0.1.12 (git+https://github.com/xflash-panda/server-client-rs?branch=dev)",
- "server-tuic-rs-agent",
+ "server-tuic-agent",
  "tokio",
  "tracing",
  "tracing-test",

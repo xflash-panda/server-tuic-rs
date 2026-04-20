@@ -1,5 +1,5 @@
 [package]
-name = "server-tuic-rs-agent"
+name = "server-tuic-agent"
 version.workspace = true
 authors.workspace = true
 description = "Minimalistic TUIC server implementation as a reference"
