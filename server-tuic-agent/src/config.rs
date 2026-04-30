@@ -6,10 +6,21 @@ use figment::{
 	Figment,
 	providers::{Format, Serialized, Toml},
 };
+use panel_connect_rpc::IpVersion;
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use tracing::{level_filters::LevelFilter, warn};
 
 use crate::utils::CongestionController;
+
+/// Parse IP version string (v4, v6, auto) into IpVersion enum
+fn parse_ip_version(s: &str) -> Result<IpVersion, String> {
+	match s.to_lowercase().as_str() {
+		"v4" | "ipv4" | "4" => Ok(IpVersion::V4),
+		"v6" | "ipv6" | "6" => Ok(IpVersion::V6),
+		"auto" => Ok(IpVersion::Auto),
+		_ => Err(format!("invalid ip version '{s}', expected v4, v6, or auto")),
+	}
+}
 
 
 /// Control flow results for CLI parsing
@@ -97,6 +108,15 @@ pub struct Cli {
 	/// Force refresh geoip and geosite databases on startup
 	#[arg(long = "refresh_geodata", default_value = "false")]
 	pub refresh_geodata: bool,
+
+	/// IP version for panel API connections: v4, v6, or auto (default: v4)
+	#[arg(
+		long = "panel_ip_version",
+		value_name = "VERSION",
+		default_value = "v4",
+		value_parser = parse_ip_version,
+	)]
+	pub panel_ip_version: IpVersion,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -424,6 +444,7 @@ pub async fn parse_config(cli: Cli) -> eyre::Result<Config> {
 		request_timeout: cli.request_timeout,
 		server_name,
 		ca_cert_path: cli.ca_cert,
+		ip_version: cli.panel_ip_version,
 	});
 
 	Ok(config)

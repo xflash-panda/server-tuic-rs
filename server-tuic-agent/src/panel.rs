@@ -1,6 +1,6 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use panel_connect_rpc::{ConnectRpcApiManager, ConnectRpcPanelConfig};
+use panel_connect_rpc::{ConnectRpcApiManager, ConnectRpcPanelConfig, IpVersion};
 use panel_core::{BackgroundTasks, BackgroundTasksHandle, NodeConfigEnum, PanelApi, StatsCollector, TaskConfig, UserManager};
 use server_client_rs::models::TuicConfig;
 use tracing::{error, info, warn};
@@ -40,6 +40,8 @@ pub struct PanelConfig {
 	pub server_name:              String,
 	/// CA certificate path (None = use system trust store)
 	pub ca_cert_path:             Option<String>,
+	/// IP version preference for outbound connections (default: Auto)
+	pub ip_version:               IpVersion,
 }
 
 /// Panel service implementation backed by server-panel-rs (ConnectRPC
@@ -63,6 +65,7 @@ impl Panel {
 			api_timeout:  Duration::from_secs(config.request_timeout),
 			server_name:  config.server_name.clone(),
 			ca_cert_path: config.ca_cert_path.clone(),
+			ip_version:   config.ip_version,
 		};
 
 		let api = Arc::new(ConnectRpcApiManager::new(rpc_config));
