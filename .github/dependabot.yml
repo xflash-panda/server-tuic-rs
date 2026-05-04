@@ -22,10 +22,34 @@ updates:
     commit-message:
       prefix: "chore(deps)"
 
+  # Rust dependencies for dev/agent-master
+  - package-ecosystem: "cargo"
+    directory: "/"
+    target-branch: "dev/agent-master"
+    registries:
+      - xflash-panda-git
+    schedule:
+      interval: "weekly"
+    groups:
+      rust-dependencies:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "chore(deps)"
+
   # GitHub Actions for dev/master
   - package-ecosystem: "github-actions"
     directory: "/"
     target-branch: "dev/master"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(ci)"
+
+  # GitHub Actions for dev/agent-master
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "dev/agent-master"
     schedule:
       interval: "weekly"
     commit-message:
