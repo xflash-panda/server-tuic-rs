@@ -7,6 +7,21 @@ registries:
     password: ${{ secrets.XFLASH_PANDA_REPO_TOKEN }}
 
 updates:
+  # Rust dependencies for dev/master
+  - package-ecosystem: "cargo"
+    directory: "/"
+    target-branch: "dev/master"
+    registries:
+      - xflash-panda-git
+    schedule:
+      interval: "weekly"
+    groups:
+      rust-dependencies:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "chore(deps)"
+
   # Rust dependencies for dev/agent-master
   - package-ecosystem: "cargo"
     directory: "/"
@@ -21,6 +36,15 @@ updates:
           - "*"
     commit-message:
       prefix: "chore(deps)"
+
+  # GitHub Actions for dev/master
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "dev/master"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(ci)"
 
   # GitHub Actions for dev/agent-master
   - package-ecosystem: "github-actions"
