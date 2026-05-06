@@ -12,6 +12,7 @@ use quinn::{
 use quinn_congestions::bbr::BbrConfig;
 use rustls::ServerConfig as RustlsServerConfig;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+use tokio::sync::Semaphore;
 use tracing::{debug, warn};
 
 use crate::{
@@ -116,18 +117,45 @@ impl Server {
 	}
 
 	pub async fn start(&self) {
-		warn!("server started, listening on {}", self.ep.local_addr().unwrap());
+		warn!(
+			"server started, listening on {}, max_connections={}",
+			self.ep.local_addr().unwrap(),
+			self.ctx.max_connections,
+		);
+
+		// Bound concurrent QUIC connections.  When the limit is reached,
+		// new incoming connections are refused (`incoming.refuse()`) instead
+		// of spawning unbounded `Connection::handle` tasks.  Without this
+		// guard, sustained handshake floods can outpace the runtime's
+		// ability to poll authentication timeouts, accumulating zombie
+		// tasks that never reach `timeout_authenticate`.
+		let conn_limiter = Arc::new(Semaphore::new(self.ctx.max_connections));
 
 		loop {
 			match self.ep.accept().await {
-				Some(conn) => match conn.accept() {
-					Ok(conn) => {
-						tokio::spawn(Connection::handle(self.ctx.clone(), conn));
+				Some(incoming) => {
+					let permit = match conn_limiter.clone().try_acquire_owned() {
+						Ok(p) => p,
+						Err(_) => {
+							debug!("[Incoming] max_connections reached, refusing handshake");
+							incoming.refuse();
+							continue;
+						}
+					};
+					match incoming.accept() {
+						Ok(conn) => {
+							let ctx = self.ctx.clone();
+							tokio::spawn(async move {
+								Connection::handle(ctx, conn).await;
+								drop(permit);
+							});
+						}
+						Err(e) => {
+							debug!("[Incoming] Failed to accept connection: {e}");
+							drop(permit);
+						}
 					}
-					Err(e) => {
-						debug!("[Incoming] Failed to accept connection: {e}");
-					}
-				},
+				}
 				None => {
 					debug!("[Incoming] the endpoint is closed");
 					return;

@@ -10,6 +10,7 @@ use tracing::{error, info, warn};
 
 pub mod acl;
 pub mod config;
+pub mod config_auto;
 pub mod connection;
 pub mod error;
 pub mod io;
@@ -33,11 +34,16 @@ pub type OnlineClients = Cache<i64, UserConnections>;
 const KICK_ERROR_CODE: quinn::VarInt = quinn::VarInt::from_u32(6002);
 
 pub struct AppContext {
-	pub cfg:            Config,
-	pub panel_service:  Arc<OptionalPanel>,
-	pub shutdown_tx:    broadcast::Sender<()>,
+	pub cfg:             Config,
+	pub panel_service:   Arc<OptionalPanel>,
+	pub shutdown_tx:     broadcast::Sender<()>,
 	/// Online clients registry for connection management
-	pub online_clients: OnlineClients,
+	pub online_clients:  OnlineClients,
+	/// Resolved cap for concurrent QUIC connections (post-`auto` resolution).
+	/// Server's accept loop uses this to construct a Semaphore that pauses
+	/// `accept()` when at capacity, preventing the unbounded-spawn death
+	/// spiral that other servers in the fleet hit before adding a similar cap.
+	pub max_connections: usize,
 }
 
 impl AppContext {
@@ -126,11 +132,43 @@ async fn run_inner(panel_service: Arc<OptionalPanel>, cfg: Config) -> eyre::Resu
 	// Online clients cache with no TTL (connections are manually managed)
 	let online_clients: OnlineClients = Cache::builder().build();
 
+	// Resolve max_connections (auto or fixed) and log the breakdown so
+	// operators can diagnose under-/over-provisioned nodes from the journal.
+	let resolved_max = config_auto::resolve(cfg.max_connections);
+	let bd = resolved_max.breakdown;
+	let mode = match resolved_max.mode {
+		config_auto::ResolveMode::Auto => "auto",
+		config_auto::ResolveMode::Fixed => "fixed",
+	};
+	info!(
+		mode = mode,
+		value = resolved_max.value,
+		cpus = resolved_max.cpus,
+		total_mem_kb = resolved_max.total_mem_kb,
+		nofile_soft = resolved_max.nofile_soft,
+		cpu_cap = bd.cpu_cap,
+		mem_cap = bd.mem_cap,
+		fd_cap = bd.fd_cap,
+		limiting = bd.limiting.as_str(),
+		"max_connections resolved"
+	);
+	if resolved_max.mode == config_auto::ResolveMode::Fixed && config_auto::fixed_exceeds_auto_cap(resolved_max.value, &bd) {
+		warn!(
+			value = resolved_max.value,
+			cpu_cap = bd.cpu_cap,
+			mem_cap = bd.mem_cap,
+			fd_cap = bd.fd_cap,
+			limiting = bd.limiting.as_str(),
+			"max_connections=fixed exceeds the auto-derived safe cap"
+		);
+	}
+
 	let ctx = Arc::new(AppContext {
 		cfg,
 		panel_service: panel_service.clone(),
 		shutdown_tx: shutdown_tx.clone(),
 		online_clients,
+		max_connections: resolved_max.value,
 	});
 
 	// Start background tasks (BackgroundTasks creates its own dedicated runtime)
