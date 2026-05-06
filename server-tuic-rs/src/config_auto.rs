@@ -269,7 +269,9 @@ fn nofile_soft_limit() -> Option<u64> {
 	};
 	// SAFETY: getrlimit fills the rlimit struct; no aliasing concerns.
 	let ret = unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) };
-	if ret == 0 { Some(rl.rlim_cur) } else { None }
+	// rlim_cur is u32 on some 32-bit targets (e.g. armv7-unknown-linux-gnueabihf)
+	// and u64 on 64-bit targets — `u64::from` is the cheapest universal lift.
+	if ret == 0 { Some(u64::from(rl.rlim_cur)) } else { None }
 }
 
 #[cfg(not(unix))]
