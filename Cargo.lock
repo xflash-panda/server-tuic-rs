@@ -559,6 +559,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dns-cache-rs"
+version = "0.2.0"
+source = "git+https://github.com/xflash-panda/dns-cache-rs.git?branch=dev#8e4545210ca5ac48ab659cebcf52e921e87520a3"
+dependencies = [
+ "async-trait",
+ "moka",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2374,7 +2386,7 @@ dependencies = [
 
 [[package]]
 name = "server-tuic-rs"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "acl-engine-rs",
  "anyhow",
@@ -2383,6 +2395,7 @@ dependencies = [
  "bytes",
  "clap",
  "derive_more",
+ "dns-cache-rs",
  "educe",
  "eyre",
  "figment",
@@ -2574,7 +2587,7 @@ dependencies = [
 
 [[package]]
 name = "tests"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "aws-lc-rs",
  "eyre",
@@ -2996,7 +3009,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuic-core"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "bytes",
  "eyre",

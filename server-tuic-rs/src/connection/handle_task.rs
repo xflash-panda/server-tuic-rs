@@ -12,6 +12,7 @@ use tuic::{
 use super::{Connection, ERROR_CODE, UdpSession};
 use crate::{
 	acl::{Addr, OutboundHandler, Protocol},
+	dns::{ResolveDecision, resolve_decision},
 	io::copy_io,
 	stats,
 	utils::UdpRelayMode,
@@ -67,6 +68,26 @@ impl Connection {
 
 			// Convert Address to acl-engine-rs Addr
 			let mut acl_addr = address_to_acl_addr(conn.addr());
+
+			// Front-load DNS resolution for Direct + domain targets so the
+			// userland cache absorbs repeat lookups instead of `Direct`'s own
+			// `tokio::net::lookup_host`. Failure here means we never call
+			// `dial_tcp`, so the fallback path inside `Direct` is unreachable.
+			if let ResolveDecision::Cache(domain) = resolve_decision(outbound.as_ref(), conn.addr()) {
+				match self.ctx.dns_resolver.resolve_to_info(domain).await {
+					Ok(info) => acl_addr = acl_addr.with_resolve_info(info),
+					Err(err) => {
+						debug!(
+							"[{id:#010x}] [{addr}] [{user}] [TCP] {target_addr} dns resolve failed: {err}",
+							id = self.id(),
+							addr = self.inner.remote_address(),
+							user = self.auth,
+						);
+						_ = conn.reset(ERROR_CODE);
+						return Ok(());
+					}
+				}
+			}
 
 			// Use acl-engine-rs's async outbound to dial TCP
 			let tcp_conn = outbound
@@ -252,6 +273,28 @@ impl Connection {
 
 			// Use acl-engine-rs's async outbound to get UDP connection
 			let mut acl_addr = address_to_acl_addr(&addr);
+
+			// Front-load DNS resolution (same rationale as the TCP path). On
+			// failure we drop the packet — no fallback to Direct's internal
+			// resolver — and the UdpSession remains idle until the client
+			// retries.
+			if let ResolveDecision::Cache(domain) = resolve_decision(outbound.as_ref(), &addr) {
+				match self.ctx.dns_resolver.resolve_to_info(domain).await {
+					Ok(info) => acl_addr = acl_addr.with_resolve_info(info),
+					Err(err) => {
+						debug!(
+							"[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] to \
+							 {src_addr} dns resolve failed: {err}",
+							id = self.id(),
+							addr = self.inner.remote_address(),
+							user = self.auth,
+							src_addr = addr,
+						);
+						return Ok(());
+					}
+				}
+			}
+
 			let udp_conn = outbound
 				.as_async_outbound()
 				.dial_udp(&mut acl_addr)

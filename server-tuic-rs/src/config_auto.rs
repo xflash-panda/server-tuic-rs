@@ -271,6 +271,9 @@ fn nofile_soft_limit() -> Option<u64> {
 	let ret = unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) };
 	// rlim_cur is u32 on some 32-bit targets (e.g. armv7-unknown-linux-gnueabihf)
 	// and u64 on 64-bit targets — `u64::from` is the cheapest universal lift.
+	// On 64-bit the conversion is a no-op; the allow suppresses the lint that
+	// only fires on 64-bit hosts.
+	#[allow(clippy::useless_conversion)]
 	if ret == 0 { Some(u64::from(rl.rlim_cur)) } else { None }
 }
 

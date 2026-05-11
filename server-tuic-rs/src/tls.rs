@@ -28,7 +28,10 @@ impl ResolvesServerCert for CertResolver {
 pub async fn load_cert_key(cert_path: &Path, key_path: &Path) -> eyre::Result<Arc<CertifiedKey>> {
 	let cert_chain = load_cert_chain(cert_path).await?;
 	let der = load_priv_key(key_path).await?;
-	#[cfg(feature = "aws-lc-rs")]
+	// When both crypto features are enabled simultaneously (e.g. `--all-features`),
+	// pick exactly one provider so the second `let key` doesn't shadow the first
+	// (which trips `unused_variables`). `ring` wins when both are on.
+	#[cfg(all(feature = "aws-lc-rs", not(feature = "ring")))]
 	let key = rustls::crypto::aws_lc_rs::sign::any_supported_type(&der).context("Unsupported private key type")?;
 	#[cfg(feature = "ring")]
 	let key = rustls::crypto::ring::sign::any_supported_type(&der).context("Unsupported private key type")?;

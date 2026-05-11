@@ -12,6 +12,7 @@ pub mod acl;
 pub mod config;
 pub mod config_auto;
 pub mod connection;
+pub mod dns;
 pub mod error;
 pub mod io;
 pub mod panel;
@@ -44,6 +45,11 @@ pub struct AppContext {
 	/// `accept()` when at capacity, preventing the unbounded-spawn death
 	/// spiral that other servers in the fleet hit before adding a similar cap.
 	pub max_connections: usize,
+	/// Userland DNS cache for proxied (Direct) outbound targets. Front-loads
+	/// resolution before `dial_tcp`/`dial_udp` so repeated lookups inside the
+	/// TTL window are served from memory instead of hitting the system
+	/// resolver.
+	pub dns_resolver:    dns::DnsResolver,
 }
 
 impl AppContext {
@@ -169,6 +175,7 @@ async fn run_inner(panel_service: Arc<OptionalPanel>, cfg: Config) -> eyre::Resu
 		shutdown_tx: shutdown_tx.clone(),
 		online_clients,
 		max_connections: resolved_max.value,
+		dns_resolver: dns::DnsResolver::new(),
 	});
 
 	// Start background tasks (BackgroundTasks creates its own dedicated runtime)
